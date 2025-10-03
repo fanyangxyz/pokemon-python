@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 class PaletteExtractor:
     """Extract color palette from an image using Blind Color Separation."""
 
-    def __init__(self, num_colors: int = 5, max_iterations: int = 200, lr: float = 0.05):
+    def __init__(self, num_colors: int = 5, max_iterations: int = 100, lr: float = 0.1):
         """
         Initialize palette extractor.
 
@@ -45,6 +45,11 @@ class PaletteExtractor:
 
         # Convert to torch tensor
         image_tensor = torch.tensor(image, dtype=torch.float32).reshape(-1, 3)  # (H*W, 3)
+
+        # Sample representative colors for palette constraint (to avoid computing unique on all pixels)
+        sample_size = min(1000, len(image_tensor))
+        sample_indices = np.random.choice(len(image_tensor), sample_size, replace=False)
+        sampled_colors = image_tensor[sample_indices]
 
         # Initialize palette with k-means++ style initialization
         palette = self._initialize_palette(image_tensor)
@@ -76,33 +81,33 @@ class PaletteExtractor:
             # Reconstruction loss (L2)
             recon_loss = torch.mean((image_tensor - reconstructed) ** 2)
 
-            # L0 approximation for sparsity (progressive increase of lambda)
-            # Approximating L0 with smooth function: 1 - exp(-lambda * w^2)
-            if iteration < self.max_iterations * 0.8:
-                lambda_current = lambda_param * (1 + iteration / (self.max_iterations * 0.8))
-            else:
-                lambda_current = lambda_param * 2
+            # L0 approximation for sparsity - encourage weights to be sparse (close to 0 or 1)
+            # Use entropy of weights as sparsity measure (lower entropy = more sparse)
+            # Add small epsilon to avoid log(0)
+            w_clipped = torch.clamp(w, 1e-10, 1.0)
+            entropy = -torch.sum(w_clipped * torch.log(w_clipped), dim=1)
+            sparsity_loss = torch.mean(entropy)
 
-            l0_approx = torch.mean(1 - torch.exp(-lambda_current * w ** 2))
+            # Palette constraint: encourage palette to pick colors from sampled image colors
+            # Use sampled colors instead of all unique colors for efficiency
+            dist_to_image = torch.cdist(p, sampled_colors)
+            min_dist = torch.min(dist_to_image, dim=1)[0]
+            palette_loss = torch.mean(min_dist)
 
-            # Palette constraint: encourage palette to pick colors from image
-            # Find nearest image colors to palette
-            image_colors_unique = torch.unique(image_tensor, dim=0)
-            if len(image_colors_unique) > 0:
-                dist_to_image = torch.cdist(p, image_colors_unique)
-                min_dist = torch.min(dist_to_image, dim=1)[0]
-                palette_loss = torch.mean(min_dist)
-            else:
-                palette_loss = 0
+            # Diversity constraint: penalize similar palette colors
+            # Compute pairwise distances between palette colors
+            palette_dists = torch.pdist(p)  # Pairwise distances
+            # Penalize small distances (encourage diversity)
+            diversity_loss = torch.mean(torch.exp(-10 * palette_dists))
 
             # Total loss
-            loss = recon_loss + 0.1 * l0_approx + 0.05 * palette_loss
+            loss = recon_loss + 0.3 * sparsity_loss + 0.05 * palette_loss + 0.1 * diversity_loss
 
             loss.backward()
             optimizer.step()
 
-            if iteration % 50 == 0:
-                logging.info(f"Palette extraction iteration {iteration}/{self.max_iterations}: Loss={loss.item():.6f}")
+            if iteration % 20 == 0:
+                logging.info(f"Iteration {iteration}/{self.max_iterations}: loss={loss.item():.6f} (recon={recon_loss.item():.6f}, sparse={sparsity_loss.item():.6f}, palette={palette_loss.item():.6f}, diversity={diversity_loss.item():.6f})")
 
         # Final weights and palette
         final_weights = F.softmax(weights, dim=1).detach().numpy().reshape(H, W, self.num_colors)
