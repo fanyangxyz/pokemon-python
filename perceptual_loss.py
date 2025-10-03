@@ -1,6 +1,7 @@
 """
 Perceptual loss using pretrained VGG network.
 Implements deep image distance for better image similarity measurement.
+Also includes lightweight CPU-friendly alternatives.
 """
 
 import torch
@@ -8,6 +9,7 @@ import torch.nn as nn
 import torchvision.models as models
 import numpy as np
 from typing import List
+from scipy.ndimage import gaussian_filter
 
 
 class VGGPerceptualLoss(nn.Module):
@@ -233,3 +235,126 @@ class DeepImageDistance:
             all_features.append(np.concatenate(feature_vectors))
 
         return np.stack(all_features)
+
+
+class LightweightImageFeatures:
+    """
+    CPU-friendly lightweight feature extractor using color histograms and statistics.
+    Much faster than VGG on CPU, suitable for palette matching.
+    """
+
+    def __init__(self):
+        """Initialize lightweight feature extractor."""
+        self.hist_bins = 16  # Number of bins per channel for color histogram
+
+    def extract_color_histogram(self, image: np.ndarray) -> np.ndarray:
+        """
+        Extract color histogram features from image.
+
+        Args:
+            image: Input image (H, W, 3) in [0, 1]
+
+        Returns:
+            Histogram features
+        """
+        # Compute 3D color histogram
+        hist, _ = np.histogramdd(
+            image.reshape(-1, 3),
+            bins=[self.hist_bins, self.hist_bins, self.hist_bins],
+            range=[[0, 1], [0, 1], [0, 1]]
+        )
+
+        # Normalize
+        hist = hist.flatten()
+        hist = hist / (np.sum(hist) + 1e-10)
+
+        return hist
+
+    def extract_spatial_color_features(self, image: np.ndarray) -> np.ndarray:
+        """
+        Extract spatial color features using multi-scale Gaussian pyramids.
+
+        Args:
+            image: Input image (H, W, 3) in [0, 1]
+
+        Returns:
+            Spatial color features
+        """
+        features = []
+
+        # Multi-scale color statistics
+        for sigma in [0, 2, 4]:
+            if sigma > 0:
+                smoothed = np.stack([
+                    gaussian_filter(image[:, :, c], sigma=sigma)
+                    for c in range(3)
+                ], axis=2)
+            else:
+                smoothed = image
+
+            # Compute statistics
+            features.append(np.mean(smoothed, axis=(0, 1)))  # Mean color
+            features.append(np.std(smoothed, axis=(0, 1)))   # Std color
+
+        return np.concatenate(features)
+
+    def extract_edge_features(self, image: np.ndarray) -> np.ndarray:
+        """
+        Extract simple edge/gradient features.
+
+        Args:
+            image: Input image (H, W, 3) in [0, 1]
+
+        Returns:
+            Edge features
+        """
+        # Convert to grayscale
+        gray = 0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+
+        # Compute gradients
+        grad_y = np.diff(gray, axis=0, prepend=gray[0:1, :])
+        grad_x = np.diff(gray, axis=1, prepend=gray[:, 0:1])
+
+        # Edge magnitude histogram
+        edge_mag = np.sqrt(grad_x**2 + grad_y**2)
+        hist, _ = np.histogram(edge_mag, bins=16, range=(0, 1))
+        hist = hist / (np.sum(hist) + 1e-10)
+
+        return hist
+
+    def get_feature_vector(self, image: np.ndarray) -> np.ndarray:
+        """
+        Get complete feature vector from image.
+
+        Args:
+            image: Input image (H, W, 3) in [0, 1]
+
+        Returns:
+            Feature vector
+        """
+        # Color histogram
+        color_hist = self.extract_color_histogram(image)
+
+        # Spatial color features
+        spatial_features = self.extract_spatial_color_features(image)
+
+        # Edge features
+        edge_features = self.extract_edge_features(image)
+
+        # Concatenate all features
+        return np.concatenate([color_hist, spatial_features, edge_features])
+
+    def batch_get_features(self, images: List[np.ndarray]) -> np.ndarray:
+        """
+        Get feature vectors for a batch of images.
+
+        Args:
+            images: List of images, each (H, W, 3) in [0, 1]
+
+        Returns:
+            Feature matrix (N, D)
+        """
+        features = []
+        for img in images:
+            features.append(self.get_feature_vector(img))
+        return np.stack(features)

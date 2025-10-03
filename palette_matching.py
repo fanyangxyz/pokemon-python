@@ -7,11 +7,12 @@ import numpy as np
 from itertools import permutations
 from typing import Tuple, List
 from color_transforms import FastColorTransformSpace
-from perceptual_loss import DeepImageDistance
+from perceptual_loss import DeepImageDistance, LightweightImageFeatures
 from hausdorff_distance import ImageSpaceDistance, ApproximateHausdorff
 import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
+import torch
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
@@ -27,7 +28,8 @@ class PaletteMatcher:
         sat_steps: int = 3,
         val_steps: int = 3,
         device: str = None,
-        use_approximate: bool = True
+        use_approximate: bool = True,
+        use_lightweight: bool = None
     ):
         """
         Initialize palette matcher.
@@ -38,9 +40,25 @@ class PaletteMatcher:
             val_steps: Number of value transformation steps
             device: Device for VGG computation
             use_approximate: Use approximate Hausdorff for speed
+            use_lightweight: Use lightweight CPU-friendly features instead of VGG (auto-detects if None)
         """
         self.transform_space = FastColorTransformSpace(hue_steps, sat_steps, val_steps)
-        self.deep_distance = DeepImageDistance(device=device)
+
+        # Auto-detect: use lightweight features on CPU, VGG on GPU
+        if use_lightweight is None:
+            if device is None:
+                use_lightweight = not torch.cuda.is_available()
+            else:
+                use_lightweight = (device == 'cpu')
+
+        self.use_lightweight = use_lightweight
+
+        if self.use_lightweight:
+            logging.info("Using lightweight CPU-friendly features (color histograms + statistics)")
+            self.feature_extractor = LightweightImageFeatures()
+        else:
+            logging.info("Using VGG deep features")
+            self.feature_extractor = DeepImageDistance(device=device)
 
         if use_approximate:
             self.hausdorff = ApproximateHausdorff(sample_size=50)
@@ -85,7 +103,7 @@ class PaletteMatcher:
 
         # Generate transformation space for recolored image
         recolored_transforms = self.transform_space.apply_all_transforms(recolored_image)
-        recolored_features = self.deep_distance.batch_get_features(recolored_transforms)
+        recolored_features = self.feature_extractor.batch_get_features(recolored_transforms)
 
         # Compute Hausdorff distance
         distance = self.hausdorff.compute_distance(source_features, recolored_features)
@@ -127,8 +145,8 @@ class PaletteMatcher:
         # Precompute source image transformation space features
         logging.info("Computing source image transformation space...")
         source_transforms = self.transform_space.apply_all_transforms(source_image)
-        logging.info("Extracting VGG features from source transforms...")
-        source_features = self.deep_distance.batch_get_features(source_transforms)
+        logging.info(f"Extracting features from source transforms ({len(source_transforms)} transforms)...")
+        source_features = self.feature_extractor.batch_get_features(source_transforms)
 
         best_distance = float('inf')
         best_permutation = None
@@ -158,28 +176,34 @@ class PaletteMatcher:
                     if (idx + 1) % 20 == 0:
                         logging.info(f"Generated transforms for {idx + 1}/{len(all_perms)} permutations")
 
-            # Step 3: Batch extract VGG features for all transforms
-            logging.info("Extracting VGG features for all permutations (batched)...")
+            # Step 3: Batch extract features for all transforms
+            logging.info("Extracting features for all permutations (batched)...")
 
             # Flatten all transforms into one big list
             all_images_flat = []
             for transforms in all_transforms:
                 all_images_flat.extend(transforms)
 
-            # Batch process VGG features
-            vgg_batch_size = 32  # Process 32 images at a time through VGG
-            all_features_flat = []
+            # Batch process features
+            if self.use_lightweight:
+                # Lightweight features can process all at once
+                logging.info(f"Processing {len(all_images_flat)} images with lightweight features...")
+                all_features_flat = self.feature_extractor.batch_get_features(all_images_flat)
+            else:
+                # VGG needs batching
+                vgg_batch_size = 32  # Process 32 images at a time through VGG
+                all_features_flat = []
 
-            for batch_start in range(0, len(all_images_flat), vgg_batch_size):
-                batch_end = min(batch_start + vgg_batch_size, len(all_images_flat))
-                if batch_start % (vgg_batch_size * 10) == 0:
-                    logging.info(f"VGG processing {batch_start}/{len(all_images_flat)} images...")
+                for batch_start in range(0, len(all_images_flat), vgg_batch_size):
+                    batch_end = min(batch_start + vgg_batch_size, len(all_images_flat))
+                    if batch_start % (vgg_batch_size * 10) == 0:
+                        logging.info(f"VGG processing {batch_start}/{len(all_images_flat)} images...")
 
-                batch_images = all_images_flat[batch_start:batch_end]
-                batch_features = self.deep_distance.batch_get_features(batch_images)
-                all_features_flat.append(batch_features)
+                    batch_images = all_images_flat[batch_start:batch_end]
+                    batch_features = self.feature_extractor.batch_get_features(batch_images)
+                    all_features_flat.append(batch_features)
 
-            all_features_flat = np.concatenate(all_features_flat, axis=0)
+                all_features_flat = np.concatenate(all_features_flat, axis=0)
 
             # Reshape back to per-permutation structure
             num_transforms_per_perm = len(all_transforms[0])
