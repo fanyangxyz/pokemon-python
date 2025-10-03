@@ -1,5 +1,7 @@
 python pokemon_recolor.py \
+    --visualize \
+    --extract-only \
     --source eevee.png \
-    --target blue_turtle.jpg \
+    --target squirtle.jpg \
     --output output.png \
     --workers 16

@@ -135,6 +135,11 @@ def main():
         default=4,
         help='Number of parallel workers for permutation testing (default: 4)'
     )
+    parser.add_argument(
+        '--extract-only',
+        action='store_true',
+        help='Only extract palettes and save them, skip palette matching'
+    )
 
     args = parser.parse_args()
 
@@ -154,6 +159,51 @@ def main():
         val_steps=args.val_steps,
         device=args.device
     )
+
+    if args.extract_only:
+        # Only extract palettes and save
+        logging.info("Extracting palettes only...")
+        from palette_extraction import PaletteExtractor
+
+        extractor = PaletteExtractor(num_colors=args.num_colors)
+
+        logging.info("Extracting source palette...")
+        source_palette, source_weights = extractor.extract_palette(source_image)
+
+        logging.info("Extracting target palette...")
+        target_palette, target_weights = extractor.extract_palette(target_image)
+
+        # Save palette information
+        import pickle
+        palette_data = {
+            'source_palette': source_palette,
+            'source_weights': source_weights,
+            'target_palette': target_palette,
+            'target_weights': target_weights
+        }
+        palette_file = args.output.replace('.png', '_palettes.pkl')
+        with open(palette_file, 'wb') as f:
+            pickle.dump(palette_data, f)
+        logging.info(f"Palette data saved to: {palette_file}")
+
+        logging.info(f"Source palette shape: {source_palette.shape}")
+        logging.info(f"Source palette colors:\n{source_palette}")
+        logging.info(f"Target palette shape: {target_palette.shape}")
+        logging.info(f"Target palette colors:\n{target_palette}")
+
+        # Visualize if requested
+        if args.visualize:
+            palette_vis_path = args.output.replace('.png', '_palettes.png')
+            # Create simple palette visualization
+            visualize_palettes(
+                source_palette,
+                target_palette,
+                np.arange(args.num_colors),  # Identity permutation for now
+                save_path=palette_vis_path
+            )
+
+        logging.info("Palette extraction complete!")
+        return
 
     # Perform palette swap
     logging.info("Performing palette swap...")
