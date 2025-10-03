@@ -8,12 +8,16 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from typing import Tuple
+import logging
+from datetime import datetime
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 class PaletteExtractor:
     """Extract color palette from an image using Blind Color Separation."""
 
-    def __init__(self, num_colors: int = 5, max_iterations: int = 1000, lr: float = 0.01):
+    def __init__(self, num_colors: int = 5, max_iterations: int = 200, lr: float = 0.05):
         """
         Initialize palette extractor.
 
@@ -97,9 +101,8 @@ class PaletteExtractor:
             loss.backward()
             optimizer.step()
 
-            if iteration % 100 == 0:
-                print(f"Iteration {iteration}: Loss={loss.item():.6f}, "
-                      f"Recon={recon_loss.item():.6f}, L0={l0_approx.item():.6f}")
+            if iteration % 50 == 0:
+                logging.info(f"Palette extraction iteration {iteration}/{self.max_iterations}: Loss={loss.item():.6f}")
 
         # Final weights and palette
         final_weights = F.softmax(weights, dim=1).detach().numpy().reshape(H, W, self.num_colors)

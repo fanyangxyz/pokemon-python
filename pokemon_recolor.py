@@ -9,6 +9,9 @@ import numpy as np
 from palette_extraction import load_image, save_image
 from palette_matching import OptimalPaletteSwap
 import matplotlib.pyplot as plt
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 def visualize_palettes(source_palette, target_palette, permutation, save_path=None):
@@ -38,7 +41,7 @@ def visualize_palettes(source_palette, target_palette, permutation, save_path=No
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Palette visualization saved to {save_path}")
+        logging.info(f"Palette visualization saved to {save_path}")
 
     plt.close()
 
@@ -59,7 +62,7 @@ def visualize_results(source_image, result_image, save_path=None):
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Result visualization saved to {save_path}")
+        logging.info(f"Result visualization saved to {save_path}")
 
     plt.close()
 
@@ -121,18 +124,29 @@ def main():
         action='store_true',
         help='Generate visualization images'
     )
+    parser.add_argument(
+        '--no-parallel',
+        action='store_true',
+        help='Disable parallel processing'
+    )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=4,
+        help='Number of parallel workers for permutation testing (default: 4)'
+    )
 
     args = parser.parse_args()
 
     # Load images
-    print(f"Loading source image: {args.source}")
+    logging.info(f"Loading source image: {args.source}")
     source_image = load_image(args.source)
 
-    print(f"Loading target image: {args.target}")
+    logging.info(f"Loading target image: {args.target}")
     target_image = load_image(args.target)
 
     # Initialize pipeline
-    print(f"\nInitializing pipeline with {args.num_colors} colors...")
+    logging.info(f"Initializing pipeline with {args.num_colors} colors...")
     swapper = OptimalPaletteSwap(
         num_colors=args.num_colors,
         hue_steps=args.hue_steps,
@@ -142,19 +156,24 @@ def main():
     )
 
     # Perform palette swap
-    print("\nPerforming palette swap...")
-    result_image, info = swapper.swap_palette(source_image, target_image)
+    logging.info("Performing palette swap...")
+    result_image, info = swapper.swap_palette(
+        source_image,
+        target_image,
+        use_parallel=not args.no_parallel,
+        num_workers=args.workers
+    )
 
     # Save result
     save_image(result_image, args.output)
-    print(f"\nRecolored image saved to: {args.output}")
+    logging.info(f"Recolored image saved to: {args.output}")
 
     # Print info
-    print(f"\nResults:")
-    print(f"  Source palette: {info['source_palette'].shape}")
-    print(f"  Target palette: {info['target_palette'].shape}")
-    print(f"  Optimal permutation: {info['permutation']}")
-    print(f"  Distance metric: {info['distance']:.6f}")
+    logging.info(f"Results:")
+    logging.info(f"  Source palette: {info['source_palette'].shape}")
+    logging.info(f"  Target palette: {info['target_palette'].shape}")
+    logging.info(f"  Optimal permutation: {info['permutation']}")
+    logging.info(f"  Distance metric: {info['distance']:.6f}")
 
     # Visualizations
     if args.visualize:
@@ -173,7 +192,7 @@ def main():
             save_path=result_vis_path
         )
 
-    print("\nDone!")
+    logging.info("Done!")
 
 
 if __name__ == '__main__':

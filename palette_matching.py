@@ -9,6 +9,11 @@ from typing import Tuple, List
 from color_transforms import FastColorTransformSpace
 from perceptual_loss import DeepImageDistance
 from hausdorff_distance import ImageSpaceDistance, ApproximateHausdorff
+import logging
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from functools import partial
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 class PaletteMatcher:
@@ -42,12 +47,40 @@ class PaletteMatcher:
         else:
             self.hausdorff = ImageSpaceDistance(use_modified=True)
 
+    def _test_single_permutation(
+        self,
+        perm: tuple,
+        source_weights: np.ndarray,
+        target_palette: np.ndarray,
+        source_features: np.ndarray
+    ) -> Tuple[float, np.ndarray]:
+        """Test a single permutation and return distance and recolored image."""
+        # Apply permuted palette
+        permuted_palette = target_palette[list(perm)]
+
+        # Reconstruct image with new palette
+        H, W, K = source_weights.shape
+        weights_flat = source_weights.reshape(-1, K)
+        recolored_image = np.matmul(weights_flat, permuted_palette).reshape(H, W, 3)
+        recolored_image = np.clip(recolored_image, 0, 1)
+
+        # Generate transformation space for recolored image
+        recolored_transforms = self.transform_space.apply_all_transforms(recolored_image)
+        recolored_features = self.deep_distance.batch_get_features(recolored_transforms)
+
+        # Compute Hausdorff distance
+        distance = self.hausdorff.compute_distance(source_features, recolored_features)
+
+        return distance, recolored_image
+
     def find_optimal_matching(
         self,
         source_image: np.ndarray,
         source_weights: np.ndarray,
         source_palette: np.ndarray,
-        target_palette: np.ndarray
+        target_palette: np.ndarray,
+        use_parallel: bool = True,
+        num_workers: int = 4
     ) -> Tuple[np.ndarray, float, np.ndarray]:
         """
         Find optimal palette color matching.
@@ -57,6 +90,8 @@ class PaletteMatcher:
             source_weights: Palette weights (H, W, K) for source
             source_palette: Source palette colors (K, 3)
             target_palette: Target palette colors (K, 3)
+            use_parallel: Use parallel processing for permutations
+            num_workers: Number of parallel workers
 
         Returns:
             - best_permutation: Optimal permutation indices
@@ -68,45 +103,61 @@ class PaletteMatcher:
         # Generate all possible permutations
         all_perms = list(permutations(range(num_colors)))
 
-        print(f"Testing {len(all_perms)} permutations...")
+        logging.info(f"Testing {len(all_perms)} permutations...")
 
         # Precompute source image transformation space features
-        print("Computing source image transformation space...")
+        logging.info("Computing source image transformation space...")
         source_transforms = self.transform_space.apply_all_transforms(source_image)
+        logging.info("Extracting VGG features from source transforms...")
         source_features = self.deep_distance.batch_get_features(source_transforms)
 
         best_distance = float('inf')
         best_permutation = None
         best_recolored_image = None
 
-        for i, perm in enumerate(all_perms):
-            if i % 10 == 0:
-                print(f"Testing permutation {i + 1}/{len(all_perms)}...")
+        if use_parallel and len(all_perms) > 10:
+            logging.info(f"Using parallel processing with {num_workers} workers...")
 
-            # Apply permuted palette
-            permuted_palette = target_palette[list(perm)]
+            test_func = partial(
+                self._test_single_permutation,
+                source_weights=source_weights,
+                target_palette=target_palette,
+                source_features=source_features
+            )
 
-            # Reconstruct image with new palette
-            H, W, K = source_weights.shape
-            weights_flat = source_weights.reshape(-1, K)
-            recolored_image = np.matmul(weights_flat, permuted_palette).reshape(H, W, 3)
-            recolored_image = np.clip(recolored_image, 0, 1)
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = {executor.submit(test_func, perm): (i, perm)
+                          for i, perm in enumerate(all_perms)}
 
-            # Generate transformation space for recolored image
-            recolored_transforms = self.transform_space.apply_all_transforms(recolored_image)
-            recolored_features = self.deep_distance.batch_get_features(recolored_transforms)
+                for future in futures:
+                    i, perm = futures[future]
+                    if i % 10 == 0:
+                        logging.info(f"Testing permutation {i + 1}/{len(all_perms)}...")
 
-            # Compute Hausdorff distance
-            distance = self.hausdorff.compute_distance(source_features, recolored_features)
+                    distance, recolored_image = future.result()
 
-            if distance < best_distance:
-                best_distance = distance
-                best_permutation = perm
-                best_recolored_image = recolored_image
-                print(f"  New best distance: {best_distance:.6f}")
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_permutation = perm
+                        best_recolored_image = recolored_image
+                        logging.info(f"  New best distance: {best_distance:.6f} at permutation {i + 1}")
+        else:
+            for i, perm in enumerate(all_perms):
+                if i % 10 == 0:
+                    logging.info(f"Testing permutation {i + 1}/{len(all_perms)}...")
 
-        print(f"Optimal permutation found: {best_permutation}")
-        print(f"Best distance: {best_distance:.6f}")
+                distance, recolored_image = self._test_single_permutation(
+                    perm, source_weights, target_palette, source_features
+                )
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_permutation = perm
+                    best_recolored_image = recolored_image
+                    logging.info(f"  New best distance: {best_distance:.6f} at permutation {i + 1}")
+
+        logging.info(f"Optimal permutation found: {best_permutation}")
+        logging.info(f"Best distance: {best_distance:.6f}")
 
         return np.array(best_permutation), best_distance, best_recolored_image
 
@@ -193,7 +244,9 @@ class OptimalPaletteSwap:
         extract_target: bool = True,
         source_palette: np.ndarray = None,
         source_weights: np.ndarray = None,
-        target_palette: np.ndarray = None
+        target_palette: np.ndarray = None,
+        use_parallel: bool = True,
+        num_workers: int = 4
     ) -> Tuple[np.ndarray, dict]:
         """
         Swap palette from target to source image.
@@ -211,23 +264,37 @@ class OptimalPaletteSwap:
             - result_image: Recolored image
             - info: Dictionary with palette info and metrics
         """
-        # Extract source palette if needed
-        if extract_source or source_palette is None or source_weights is None:
-            print("Extracting source palette...")
-            source_palette, source_weights = self.palette_extractor.extract_palette(source_image)
+        # Extract palettes in parallel if both needed
+        if (extract_source or source_palette is None or source_weights is None) and \
+           (extract_target or target_palette is None):
+            logging.info("Extracting source and target palettes in parallel...")
 
-        # Extract target palette if needed
-        if extract_target or target_palette is None:
-            print("Extracting target palette...")
-            target_palette, _ = self.palette_extractor.extract_palette(target_image)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_source = executor.submit(self.palette_extractor.extract_palette, source_image)
+                future_target = executor.submit(self.palette_extractor.extract_palette, target_image)
+
+                source_palette, source_weights = future_source.result()
+                target_palette, _ = future_target.result()
+        else:
+            # Extract source palette if needed
+            if extract_source or source_palette is None or source_weights is None:
+                logging.info("Extracting source palette...")
+                source_palette, source_weights = self.palette_extractor.extract_palette(source_image)
+
+            # Extract target palette if needed
+            if extract_target or target_palette is None:
+                logging.info("Extracting target palette...")
+                target_palette, _ = self.palette_extractor.extract_palette(target_image)
 
         # Find optimal matching
-        print("Finding optimal palette matching...")
+        logging.info("Finding optimal palette matching...")
         permutation, distance, result_image = self.palette_matcher.find_optimal_matching(
             source_image,
             source_weights,
             source_palette,
-            target_palette
+            target_palette,
+            use_parallel=use_parallel,
+            num_workers=num_workers
         )
 
         info = {
