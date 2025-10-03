@@ -47,6 +47,25 @@ class PaletteMatcher:
         else:
             self.hausdorff = ImageSpaceDistance(use_modified=True)
 
+    def _generate_recolored_images(
+        self,
+        all_perms: List[tuple],
+        source_weights: np.ndarray,
+        target_palette: np.ndarray
+    ) -> List[np.ndarray]:
+        """Generate all recolored images for all permutations."""
+        H, W, K = source_weights.shape
+        weights_flat = source_weights.reshape(-1, K)
+
+        recolored_images = []
+        for perm in all_perms:
+            permuted_palette = target_palette[list(perm)]
+            recolored_image = np.matmul(weights_flat, permuted_palette).reshape(H, W, 3)
+            recolored_image = np.clip(recolored_image, 0, 1)
+            recolored_images.append(recolored_image)
+
+        return recolored_images
+
     def _test_single_permutation(
         self,
         perm: tuple,
@@ -116,31 +135,75 @@ class PaletteMatcher:
         best_recolored_image = None
 
         if use_parallel and len(all_perms) > 10:
-            logging.info(f"Using parallel processing with {num_workers} workers...")
+            logging.info(f"Using optimized batch processing...")
 
-            test_func = partial(
-                self._test_single_permutation,
-                source_weights=source_weights,
-                target_palette=target_palette,
-                source_features=source_features
-            )
+            # Step 1: Generate all recolored images (fast, CPU only)
+            logging.info("Generating all recolored images...")
+            recolored_images = self._generate_recolored_images(all_perms, source_weights, target_palette)
+
+            # Step 2: Generate all transformation spaces in parallel
+            logging.info(f"Generating transformation spaces with {num_workers} workers...")
+
+            def process_transforms(idx):
+                return idx, self.transform_space.apply_all_transforms(recolored_images[idx])
+
+            all_transforms = [None] * len(all_perms)
 
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = {executor.submit(test_func, perm): (i, perm)
-                          for i, perm in enumerate(all_perms)}
+                futures = [executor.submit(process_transforms, i) for i in range(len(all_perms))]
 
                 for future in futures:
-                    i, perm = futures[future]
-                    if i % 10 == 0:
-                        logging.info(f"Testing permutation {i + 1}/{len(all_perms)}...")
+                    idx, transforms = future.result()
+                    all_transforms[idx] = transforms
+                    if (idx + 1) % 20 == 0:
+                        logging.info(f"Generated transforms for {idx + 1}/{len(all_perms)} permutations")
 
-                    distance, recolored_image = future.result()
+            # Step 3: Batch extract VGG features for all transforms
+            logging.info("Extracting VGG features for all permutations (batched)...")
 
-                    if distance < best_distance:
-                        best_distance = distance
-                        best_permutation = perm
-                        best_recolored_image = recolored_image
-                        logging.info(f"  New best distance: {best_distance:.6f} at permutation {i + 1}")
+            # Flatten all transforms into one big list
+            all_images_flat = []
+            for transforms in all_transforms:
+                all_images_flat.extend(transforms)
+
+            # Batch process VGG features
+            vgg_batch_size = 32  # Process 32 images at a time through VGG
+            all_features_flat = []
+
+            for batch_start in range(0, len(all_images_flat), vgg_batch_size):
+                batch_end = min(batch_start + vgg_batch_size, len(all_images_flat))
+                if batch_start % (vgg_batch_size * 10) == 0:
+                    logging.info(f"VGG processing {batch_start}/{len(all_images_flat)} images...")
+
+                batch_images = all_images_flat[batch_start:batch_end]
+                batch_features = self.deep_distance.batch_get_features(batch_images)
+                all_features_flat.append(batch_features)
+
+            all_features_flat = np.concatenate(all_features_flat, axis=0)
+
+            # Reshape back to per-permutation structure
+            num_transforms_per_perm = len(all_transforms[0])
+            all_perm_features = []
+            for i in range(len(all_perms)):
+                start_idx = i * num_transforms_per_perm
+                end_idx = start_idx + num_transforms_per_perm
+                perm_features = all_features_flat[start_idx:end_idx]
+                all_perm_features.append(perm_features)
+
+            # Step 4: Compute distances
+            logging.info("Computing Hausdorff distances...")
+
+            for i in range(len(all_perms)):
+                if i % 20 == 0:
+                    logging.info(f"Computing distance for permutation {i + 1}/{len(all_perms)}...")
+
+                distance = self.hausdorff.compute_distance(source_features, all_perm_features[i])
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_permutation = all_perms[i]
+                    best_recolored_image = recolored_images[i]
+                    logging.info(f"  New best distance: {best_distance:.6f} at permutation {i + 1}")
         else:
             for i, perm in enumerate(all_perms):
                 if i % 10 == 0:

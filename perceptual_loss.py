@@ -194,7 +194,7 @@ class DeepImageDistance:
 
     def batch_get_features(self, images: List[np.ndarray]) -> np.ndarray:
         """
-        Get feature vectors for a batch of images.
+        Get feature vectors for a batch of images using batched VGG forward pass.
 
         Args:
             images: List of images, each (H, W, 3) in [0, 1]
@@ -202,9 +202,34 @@ class DeepImageDistance:
         Returns:
             Feature matrix (N, D) where N is number of images
         """
-        features = []
-        for img in images:
-            feat = self.get_feature_vector(img)
-            features.append(feat)
+        if len(images) == 0:
+            return np.array([])
 
-        return np.stack(features)
+        # Convert all images to tensor batch
+        tensors = []
+        for img in images:
+            tensor = torch.from_numpy(img).permute(2, 0, 1).float()
+            tensors.append(tensor)
+
+        # Stack into batch (N, 3, H, W)
+        batch_tensor = torch.stack(tensors).to(self.vgg_loss.device)
+
+        with torch.no_grad():
+            # Single batched VGG forward pass
+            batch_features = self.vgg_loss.extract_features(batch_tensor)
+
+        # Extract feature vectors for each image
+        all_features = []
+        for i in range(len(images)):
+            feature_vectors = []
+            for layer_feat in batch_features:
+                # Get features for image i
+                feat = layer_feat[i]  # (C, H, W)
+                feat_np = feat.cpu().numpy().reshape(feat.shape[0], -1).T  # (H*W, C)
+                # Average over spatial dimension
+                feat_avg = np.mean(feat_np, axis=0)  # (C,)
+                feature_vectors.append(feat_avg)
+
+            all_features.append(np.concatenate(feature_vectors))
+
+        return np.stack(all_features)
