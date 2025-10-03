@@ -344,17 +344,50 @@ class LightweightImageFeatures:
         # Concatenate all features
         return np.concatenate([color_hist, spatial_features, edge_features])
 
-    def batch_get_features(self, images: List[np.ndarray]) -> np.ndarray:
+    def batch_get_features(self, images: List[np.ndarray], num_workers: int = None, show_progress: bool = True) -> np.ndarray:
         """
-        Get feature vectors for a batch of images.
+        Get feature vectors for a batch of images (parallelized).
 
         Args:
             images: List of images, each (H, W, 3) in [0, 1]
+            num_workers: Number of parallel workers (default: CPU count)
+            show_progress: Whether to show progress logging
 
         Returns:
             Feature matrix (N, D)
         """
-        features = []
-        for img in images:
-            features.append(self.get_feature_vector(img))
+        if len(images) == 0:
+            return np.array([])
+
+        # Use parallel processing for large batches
+        if len(images) > 10:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import multiprocessing
+            import logging
+
+            if num_workers is None:
+                num_workers = multiprocessing.cpu_count()
+
+            features = [None] * len(images)
+            completed = 0
+
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all tasks with indices
+                future_to_idx = {executor.submit(self.get_feature_vector, img): idx
+                                for idx, img in enumerate(images)}
+
+                # Process completed futures
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    features[idx] = future.result()
+                    completed += 1
+
+                    # Log progress every 100 images or at key milestones
+                    if show_progress and (completed % 100 == 0 or completed == len(images) or
+                                         completed == len(images) // 4 or completed == len(images) // 2):
+                        pct = 100 * completed / len(images)
+                        logging.info(f"  Feature extraction progress: {completed}/{len(images)} ({pct:.1f}%)")
+        else:
+            features = [self.get_feature_vector(img) for img in images]
+
         return np.stack(features)
