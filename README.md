@@ -1,23 +1,26 @@
 # Pokémon Color Palette Swapping
 
-An implementation of the optimal Pokémon color palette swapping algorithm, based on research for automatically transferring color schemes between any Pokémon images.
+An implementation of optimal color palette swapping for images, designed for transferring color schemes between Pokémon or any other images.
 
 ## Overview
 
 This project implements an automatic color palette extraction and swapping system that can:
-- Extract color palettes from Pokémon images using Blind Color Separation
-- Apply any extracted palette to any Pokémon image
-- Find the optimal palette color matching using perceptual loss and image space distance
+- Extract dominant color palettes from images using k-means clustering
+- Apply any extracted palette to any image
+- Find the optimal palette color matching using perceptual distance and image space comparison
+- Visualize palette extraction and matching results
 
 ## Algorithm
 
 The algorithm consists of several key components:
 
-1. **Palette Extraction**: Uses a modified Blind Color Separation approach with gradient descent optimization to extract K dominant colors from an image
+1. **Palette Extraction**: Uses k-means clustering to extract K dominant colors from an image, with hard assignment for crisp color boundaries
 
 2. **Dense Color Transformation Space**: Generates variations of images using HSV color shifts (Hue, Saturation, Value) to create a robust color transformation space
 
-3. **Perceptual Distance**: Uses pretrained VGG16 network to compute deep feature-based distance between images, capturing perceptual similarity better than RGB distance
+3. **Perceptual Features**:
+   - **CPU mode** (default): Uses lightweight features (color histograms, spatial statistics, edge features) for fast processing
+   - **GPU mode**: Uses pretrained VGG16 network for deep feature-based distance
 
 4. **Hausdorff Distance**: Measures distance between image transformation spaces to find color-invariant geometric similarity
 
@@ -29,43 +32,86 @@ The algorithm consists of several key components:
 pip install -r requirements.txt
 ```
 
+Required packages:
+- numpy
+- torch
+- torchvision
+- pillow
+- matplotlib
+- scikit-learn
+- scipy
+
 ## Usage
 
-Basic usage:
+### Basic usage:
 
 ```bash
 python pokemon_recolor.py --source pikachu.png --target charmander.png --output recolored.png
 ```
 
-With visualization:
+### With visualization:
 
 ```bash
-python pokemon_recolor.py --source pikachu.png --target charmander.png --output recolored.png --visualize
+python pokemon_recolor.py \
+    --source pikachu.png \
+    --target charmander.png \
+    --output recolored.png \
+    --visualize
+```
+
+### Extract palettes only (for debugging):
+
+```bash
+python pokemon_recolor.py \
+    --source image.png \
+    --target image2.png \
+    --extract-only \
+    --visualize
+```
+
+### Show all permutation results:
+
+```bash
+python pokemon_recolor.py \
+    --source image.png \
+    --target image2.png \
+    --show-all-permutations \
+    --visualize
 ```
 
 ### Arguments
 
-- `--source`: Path to source Pokémon image (required)
-- `--target`: Path to target Pokémon image to extract palette from (required)
-- `--output`: Path to save recolored image (default: recolored_pokemon.png)
+**Required:**
+- `--source`: Path to source image
+- `--target`: Path to target image to extract palette from
+
+**Optional:**
+- `--output`: Path to save recolored image (default: `recolored_pokemon.png`)
 - `--num-colors`: Number of colors in palette (default: 5)
+  - Smaller = faster but less detail
+  - Recommended: 3-8 colors
 - `--hue-steps`: Hue transformation steps (default: 8)
 - `--sat-steps`: Saturation transformation steps (default: 3)
 - `--val-steps`: Value transformation steps (default: 3)
-- `--device`: Device for computation (cuda or cpu, default: auto)
+- `--device`: Device for computation (`cuda` or `cpu`, default: auto-detect)
+- `--workers`: Number of parallel workers (default: 4)
 - `--visualize`: Generate visualization images
+- `--extract-only`: Only extract palettes, skip matching
+- `--show-all-permutations`: Visualize all permutation results
+- `--no-parallel`: Disable parallel processing
 
 ## How It Works
 
-### 1. Palette Extraction
+### 1. Palette Extraction (K-means)
 
-Images are represented as a weighted combination of palette colors:
+Each image is quantized to K dominant colors using k-means clustering:
 
 ```
-I(x,y) = Σ w_i(x,y) * c_i
+1. Sample pixels from the image
+2. Run k-means to find K cluster centers (palette colors)
+3. Assign each pixel to nearest cluster (hard assignment)
+4. Each pixel is represented as: I(x,y) = c_i where i = nearest cluster
 ```
-
-where `c_i` are palette colors and `w_i` are spatially-varying weights.
 
 ### 2. Color Transformation Space
 
@@ -73,19 +119,33 @@ For each image, we generate a dense set of color variations by shifting HSV para
 
 ```
 T(I) = {I transformed by all combinations of hue, sat, val shifts}
+Total transforms = hue_steps × sat_steps × val_steps
 ```
 
-### 3. Image Space Distance
+### 3. Feature Extraction
 
-The distance between two images is defined as the Hausdorff distance between their transformation spaces in VGG feature space:
+**CPU Mode (Lightweight Features):**
+- 3D color histograms (16×16×16 bins)
+- Multi-scale spatial color statistics
+- Edge gradient histograms
+- ~100x faster than VGG on CPU
+
+**GPU Mode (VGG Features):**
+- Pretrained VGG16 features from multiple layers
+- Higher quality perceptual distance
+- Requires CUDA-capable GPU
+
+### 4. Image Space Distance
+
+The distance between two images is the Hausdorff distance between their transformation spaces in feature space:
 
 ```
 D(I₁, I₂) = H(φ(T(I₁)), φ(T(I₂)))
 ```
 
-where `φ` is the VGG feature extractor and `H` is Hausdorff distance.
+where `φ` is the feature extractor and `H` is Hausdorff distance.
 
-### 4. Optimal Permutation
+### 5. Optimal Permutation
 
 Find the palette permutation π that minimizes:
 
@@ -95,39 +155,118 @@ Find the palette permutation π that minimizes:
 
 ## Module Structure
 
-- `palette_extraction.py`: Palette extraction using Blind Color Separation
+- `palette_extraction.py`: K-means based palette extraction
 - `color_transforms.py`: Dense color transformation space (HSV shifts)
-- `perceptual_loss.py`: VGG-based perceptual distance computation
+- `perceptual_loss.py`: VGG and lightweight feature extraction
 - `hausdorff_distance.py`: Hausdorff distance for image spaces
 - `palette_matching.py`: Optimal palette matching algorithm
 - `pokemon_recolor.py`: Main script for color swapping
 
 ## Performance Notes
 
-- For 5 colors, there are 120 permutations to test
-- Each permutation requires computing transformation space (default: 8×3×3 = 72 transforms)
-- VGG feature extraction is GPU-accelerated when available
-- Approximate Hausdorff distance is used by default for speed
+### Computational Complexity
+
+For K colors:
+- **Permutations to test**: K! (e.g., 5 colors = 120 permutations)
+- **Transforms per image**: hue_steps × sat_steps × val_steps (default: 72)
+- **Total feature extractions**: K! × transforms (e.g., 120 × 72 = 8,640)
+
+### Speed Optimization
+
+- **CPU mode**: Uses parallelized lightweight features
+- **GPU mode**: Batched VGG feature extraction
+- **Palette extraction**: Parallel extraction of source and target
+- **Workers**: Use `--workers` to set parallelism (default: 4)
+
+### Recommended Settings
+
+**Fast (< 1 min):**
+```bash
+--num-colors 3 --hue-steps 4 --sat-steps 2 --val-steps 2
+# 6 permutations × 16 transforms = 96 feature extractions
+```
+
+**Balanced (1-5 min):**
+```bash
+--num-colors 5 --hue-steps 5 --sat-steps 3 --val-steps 3
+# 120 permutations × 45 transforms = 5,400 feature extractions
+```
+
+**High Quality (5-15 min):**
+```bash
+--num-colors 6 --hue-steps 8 --sat-steps 3 --val-steps 3
+# 720 permutations × 72 transforms = 51,840 feature extractions
+```
+
+## Visualization Output
+
+When `--visualize` is used, the following files are generated:
+
+**Palette extraction mode (`--extract-only`):**
+- `output_palettes.png`: Side-by-side palette comparison
+- `output_kmeans_source.png`: Original vs quantized source + palette
+- `output_kmeans_target.png`: Original vs quantized target + palette
+
+**Full pipeline mode:**
+- `output_palettes.png`: Palette comparison with optimal matching
+- `output_comparison.png`: Original vs recolored result
+- `output_all_permutations.png`: Grid of all permutation results (with `--show-all-permutations`)
 
 ## Examples
 
-Transfer Charmander's color scheme to Pikachu:
+### Transfer color scheme:
 ```bash
-python pokemon_recolor.py --source pikachu.png --target charmander.png --output pikachu_fire.png --visualize
+python pokemon_recolor.py \
+    --source images/eevee.png \
+    --target images/squirtle.png \
+    --output eevee_water.png \
+    --visualize
 ```
 
-Use more colors for finer detail:
+### Use more colors for detail:
 ```bash
-python pokemon_recolor.py --source pokemon1.png --target pokemon2.png --num-colors 7 --output result.png
+python pokemon_recolor.py \
+    --source pokemon1.png \
+    --target pokemon2.png \
+    --num-colors 8 \
+    --output result.png
 ```
 
-## Citation
+### Fast preview:
+```bash
+python pokemon_recolor.py \
+    --source image1.png \
+    --target image2.png \
+    --num-colors 3 \
+    --hue-steps 4 \
+    --sat-steps 2 \
+    --val-steps 2 \
+    --output preview.png
+```
 
-This implementation is based on the research paper on optimal Pokémon color swapping algorithms. The core idea uses:
-- Blind Color Separation for palette extraction
-- L0 gradient minimization for sparsity
-- Perceptual loss with pretrained VGG
-- Hausdorff distance for image space comparison
+## Technical Details
+
+### K-means Palette Extraction
+
+- Samples 10% of pixels for speed (configurable via `sample_fraction`)
+- Uses k-means++ initialization for better convergence
+- 10 random initializations to find best clustering
+- Hard assignment ensures crisp color boundaries
+- Logs color distribution statistics
+
+### Lightweight Features (CPU)
+
+Designed for fast CPU processing:
+- **Color histogram**: 16³ = 4,096 bins
+- **Spatial features**: Multi-scale (σ=0,2,4) mean and std
+- **Edge features**: Gradient magnitude histogram (16 bins)
+- **Total feature dimension**: ~4,130 per image
+
+### Parallelization
+
+- Palette extraction: 2 workers (source + target in parallel)
+- Feature extraction: CPU count workers (default)
+- Transform generation: Configurable via `--workers`
 
 ## License
 
