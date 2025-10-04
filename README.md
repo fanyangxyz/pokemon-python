@@ -5,7 +5,9 @@ An implementation of optimal color palette swapping for images, designed for tra
 ## Overview
 
 This project implements an automatic color palette extraction and swapping system that can:
-- Extract dominant color palettes from images using k-means clustering
+- Extract dominant color palettes from images using multiple methods:
+  - **K-means clustering** (default): Fast and robust
+  - **Blind Color Separation**: Gradient descent with L0 sparsity constraints (slower but potentially more accurate)
 - Apply any extracted palette to any image
 - Find the optimal palette color matching using perceptual distance and image space comparison
 - Visualize palette extraction and matching results
@@ -14,7 +16,9 @@ This project implements an automatic color palette extraction and swapping syste
 
 The algorithm consists of several key components:
 
-1. **Palette Extraction**: Uses k-means clustering to extract K dominant colors from an image, with hard assignment for crisp color boundaries
+1. **Palette Extraction**: Two methods available:
+   - **K-means** (default): Uses k-means clustering to extract K dominant colors with hard assignment for crisp color boundaries
+   - **Blind Color Separation**: Gradient descent optimization with L0 approximation for sparsity, inspired by "L0 Gradient Minimization". Includes constraints to select colors from the original image
 
 2. **Dense Color Transformation Space**: Generates variations of images using HSV color shifts (Hue, Saturation, Value) to create a robust color transformation space
 
@@ -79,6 +83,16 @@ python pokemon_recolor.py \
     --visualize
 ```
 
+### Use Blind Color Separation for palette extraction:
+
+```bash
+python pokemon_recolor.py \
+    --source image.png \
+    --target image2.png \
+    --extraction-method blind_separation \
+    --output recolored.png
+```
+
 ### Arguments
 
 **Required:**
@@ -90,6 +104,9 @@ python pokemon_recolor.py \
 - `--num-colors`: Number of colors in palette (default: 5)
   - Smaller = faster but less detail
   - Recommended: 3-8 colors
+- `--extraction-method`: Palette extraction method (default: `kmeans`)
+  - `kmeans`: Fast k-means clustering (recommended)
+  - `blind_separation`: Gradient descent with L0 sparsity (4-5x slower, potentially more accurate)
 - `--hue-steps`: Hue transformation steps (default: 8)
 - `--sat-steps`: Saturation transformation steps (default: 3)
 - `--val-steps`: Value transformation steps (default: 3)
@@ -102,15 +119,27 @@ python pokemon_recolor.py \
 
 ## How It Works
 
-### 1. Palette Extraction (K-means)
+### 1. Palette Extraction
 
-Each image is quantized to K dominant colors using k-means clustering:
+Two methods are available:
 
+**K-means (default):**
 ```
 1. Sample pixels from the image
 2. Run k-means to find K cluster centers (palette colors)
 3. Assign each pixel to nearest cluster (hard assignment)
 4. Each pixel is represented as: I(x,y) = c_i where i = nearest cluster
+```
+
+**Blind Color Separation:**
+```
+1. Initialize palette with random colors from image
+2. Optimize using gradient descent to minimize:
+   - Reconstruction loss (L2)
+   - Sparsity loss (L0 approximation with progressive β)
+   - Diversity loss (ensure colors are different)
+   - Color constraint (palette colors from original image)
+3. Weights are normalized with softmax for smooth blending
 ```
 
 ### 2. Color Transformation Space

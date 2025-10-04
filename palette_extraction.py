@@ -1,6 +1,7 @@
 """
-Palette extraction module using k-means clustering.
-Simple and robust approach for extracting dominant colors from images.
+Palette extraction module with multiple methods:
+1. K-means clustering - Simple and robust
+2. Blind Color Separation - Gradient descent optimization with sparsity constraints
 """
 
 import numpy as np
@@ -8,29 +9,53 @@ from PIL import Image
 from typing import Tuple
 import logging
 from sklearn.cluster import KMeans
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 class PaletteExtractor:
-    """Extract color palette from an image using k-means clustering."""
+    """Extract color palette from an image using k-means clustering or Blind Color Separation."""
 
-    def __init__(self, num_colors: int = 5, max_iterations: int = 300, sample_fraction: float = 0.1):
+    def __init__(self, num_colors: int = 5, max_iterations: int = 300, sample_fraction: float = 0.1, method: str = 'kmeans'):
         """
         Initialize palette extractor.
 
         Args:
             num_colors: Number of colors in the palette
-            max_iterations: Maximum k-means iterations
+            max_iterations: Maximum iterations (for k-means or gradient descent)
             sample_fraction: Fraction of pixels to sample for k-means (for speed)
+            method: Extraction method - 'kmeans' or 'blind_separation'
         """
         self.num_colors = num_colors
         self.max_iterations = max_iterations
         self.sample_fraction = sample_fraction
+        self.method = method
+
+        if method not in ['kmeans', 'blind_separation']:
+            raise ValueError(f"Unknown method: {method}. Use 'kmeans' or 'blind_separation'")
 
     def extract_palette(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Extract palette and weights from an image using k-means.
+        Extract palette and weights from an image.
+
+        Args:
+            image: Input image as numpy array (H, W, 3) with values in [0, 1]
+
+        Returns:
+            palette: (num_colors, 3) array of RGB colors
+            weights: (H, W, num_colors) array of weights for each pixel
+        """
+        if self.method == 'kmeans':
+            return self._extract_palette_kmeans(image)
+        elif self.method == 'blind_separation':
+            return self._extract_palette_blind_separation(image)
+
+    def _extract_palette_kmeans(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Extract palette and weights using k-means clustering.
 
         Args:
             image: Input image as numpy array (H, W, 3) with values in [0, 1]
@@ -91,6 +116,111 @@ class PaletteExtractor:
 
         return palette, weights
 
+    def _extract_palette_blind_separation(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Extract palette using Blind Color Separation with gradient descent.
+        Based on L0 gradient minimization approach with sparsity constraints.
+
+        Args:
+            image: Input image as numpy array (H, W, 3) with values in [0, 1]
+
+        Returns:
+            palette: (num_colors, 3) array of RGB colors
+            weights: (H, W, num_colors) array of weights for each pixel
+        """
+        H, W, C = image.shape
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        logging.info(f"Running Blind Color Separation on {device}...")
+
+        # Convert image to torch tensor
+        image_tensor = torch.from_numpy(image).float().to(device)
+        image_flat = image_tensor.reshape(-1, 3)  # (H*W, 3)
+
+        # Initialize palette with random colors from image
+        pixel_indices = np.random.choice(H * W, self.num_colors, replace=False)
+        palette = nn.Parameter(image_flat[pixel_indices].clone())
+
+        # Initialize weights (H*W, K) with uniform distribution
+        weights = nn.Parameter(torch.ones(H * W, self.num_colors, device=device) / self.num_colors)
+
+        # Optimizer
+        optimizer = optim.Adam([palette, weights], lr=0.01)
+
+        # Progressive L0 approximation parameter (gradually increase)
+        beta_start = 0.1
+        beta_end = 10.0
+        beta_schedule = np.logspace(np.log10(beta_start), np.log10(beta_end), self.max_iterations)
+
+        logging.info(f"Starting optimization for {self.max_iterations} iterations...")
+
+        for iteration in range(self.max_iterations):
+            optimizer.zero_grad()
+
+            # Ensure weights are non-negative and sum to 1
+            weights_normalized = torch.softmax(weights, dim=1)
+
+            # Reconstruct image
+            reconstructed = torch.matmul(weights_normalized, palette)
+
+            # Reconstruction loss (L2)
+            recon_loss = torch.mean((reconstructed - image_flat) ** 2)
+
+            # Sparsity loss (L0 approximation using smooth approximation)
+            # Using sigmoid-based smooth L0: 1 / (1 + exp(-beta * (w - threshold)))
+            beta = beta_schedule[iteration]
+            threshold = 0.1
+            sparsity_loss = torch.mean(
+                torch.sigmoid(beta * (weights_normalized - threshold))
+            )
+
+            # Palette diversity loss (ensure colors are different)
+            palette_distances = torch.cdist(palette, palette, p=2)
+            # Penalize if colors are too similar (exclude diagonal)
+            diversity_loss = -torch.mean(
+                palette_distances + torch.eye(self.num_colors, device=device) * 10.0
+            )
+
+            # Color constraint: palette colors should be from the image
+            # Find nearest image color for each palette color
+            distances_to_image = torch.cdist(palette, image_flat, p=2)
+            min_distances, _ = torch.min(distances_to_image, dim=1)
+            color_constraint_loss = torch.mean(min_distances)
+
+            # Total loss
+            loss = recon_loss + 0.1 * sparsity_loss + 0.01 * diversity_loss + 0.05 * color_constraint_loss
+
+            loss.backward()
+            optimizer.step()
+
+            # Clamp palette to [0, 1]
+            with torch.no_grad():
+                palette.data.clamp_(0, 1)
+
+            if (iteration + 1) % 50 == 0:
+                logging.info(
+                    f"Iteration {iteration + 1}/{self.max_iterations}: "
+                    f"Loss={loss.item():.6f}, "
+                    f"Recon={recon_loss.item():.6f}, "
+                    f"Sparsity={sparsity_loss.item():.6f}, "
+                    f"Beta={beta:.2f}"
+                )
+
+        # Extract final palette and weights
+        with torch.no_grad():
+            final_palette = palette.detach().cpu().numpy()
+            final_weights = torch.softmax(weights, dim=1).detach().cpu().numpy()
+            final_weights = final_weights.reshape(H, W, self.num_colors)
+
+        # Log palette statistics
+        for i, color in enumerate(final_palette):
+            color_rgb = (color * 255).astype(int)
+            pixel_count = np.sum(np.argmax(final_weights, axis=2) == i)
+            percentage = 100 * pixel_count / (H * W)
+            logging.info(f"  Color {i}: RGB{tuple(color_rgb)} - {percentage:.1f}% of pixels")
+
+        return final_palette, final_weights
+
     def visualize_kmeans_result(self, image: np.ndarray, palette: np.ndarray, weights: np.ndarray, save_path: str = None):
         """
         Visualize k-means clustering result showing original vs quantized image.
@@ -118,9 +248,10 @@ class PaletteExtractor:
         axes[0].set_title('Original Image', fontsize=14, fontweight='bold')
         axes[0].axis('off')
 
-        # Quantized image
+        # Reconstructed image
+        method_name = f'{self.method.replace("_", " ").title()}'
         axes[1].imshow(quantized)
-        axes[1].set_title(f'K-means Quantized ({K} colors)', fontsize=14, fontweight='bold')
+        axes[1].set_title(f'{method_name} ({K} colors)', fontsize=14, fontweight='bold')
         axes[1].axis('off')
 
         # Palette with statistics
@@ -144,7 +275,7 @@ class PaletteExtractor:
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            logging.info(f"K-means visualization saved to {save_path}")
+            logging.info(f"Palette extraction visualization saved to {save_path}")
 
         plt.close()
 

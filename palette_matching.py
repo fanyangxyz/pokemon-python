@@ -322,7 +322,8 @@ class OptimalPaletteSwap:
         hue_steps: int = 8,
         sat_steps: int = 3,
         val_steps: int = 3,
-        device: str = None
+        device: str = None,
+        extraction_method: str = 'kmeans'
     ):
         """
         Initialize optimal palette swap.
@@ -333,10 +334,11 @@ class OptimalPaletteSwap:
             sat_steps: HSV saturation steps
             val_steps: HSV value steps
             device: Device for neural network
+            extraction_method: Palette extraction method ('kmeans' or 'blind_separation')
         """
         from palette_extraction import PaletteExtractor
 
-        self.palette_extractor = PaletteExtractor(num_colors=num_colors)
+        self.palette_extractor = PaletteExtractor(num_colors=num_colors, method=extraction_method)
         self.palette_matcher = PaletteMatcher(
             hue_steps=hue_steps,
             sat_steps=sat_steps,
