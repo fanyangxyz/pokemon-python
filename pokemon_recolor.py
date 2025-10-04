@@ -67,6 +67,66 @@ def visualize_results(source_image, result_image, save_path=None):
     plt.close()
 
 
+def visualize_all_permutations(source_image, all_results, best_perm, best_distance, save_path=None):
+    """Visualize all permutation results with the best one highlighted."""
+    import math
+
+    permutations = all_results['permutations']
+    distances = all_results['distances']
+    images = all_results['images']
+
+    num_perms = len(permutations)
+
+    # Sort by distance
+    sorted_indices = np.argsort(distances)
+
+    # Create grid layout
+    ncols = min(6, num_perms)
+    nrows = math.ceil(num_perms / ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 3, nrows * 3.5))
+
+    if num_perms == 1:
+        axes = np.array([axes])
+    axes = axes.flatten()
+
+    for idx, sorted_idx in enumerate(sorted_indices):
+        perm = permutations[sorted_idx]
+        dist = distances[sorted_idx]
+        img = images[sorted_idx]
+
+        axes[idx].imshow(img)
+
+        # Check if this is the best permutation
+        is_best = np.array_equal(perm, best_perm)
+
+        title = f"Perm: {perm}\nDist: {dist:.4f}"
+        if is_best:
+            title = f"★ BEST ★\n{title}"
+            axes[idx].set_title(title, fontweight='bold', color='green', fontsize=10)
+            # Add border
+            for spine in axes[idx].spines.values():
+                spine.set_edgecolor('green')
+                spine.set_linewidth(3)
+        else:
+            axes[idx].set_title(title, fontsize=9)
+
+        axes[idx].axis('off')
+
+    # Hide empty subplots
+    for idx in range(num_perms, len(axes)):
+        axes[idx].axis('off')
+
+    plt.suptitle(f'All {num_perms} Permutations (sorted by distance)', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        logging.info(f"All permutations visualization saved to {save_path}")
+
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Apply color palette from one Pokemon image to another'
@@ -140,6 +200,11 @@ def main():
         action='store_true',
         help='Only extract palettes and save them, skip palette matching'
     )
+    parser.add_argument(
+        '--show-all-permutations',
+        action='store_true',
+        help='Visualize all permutation results with the optimal one highlighted'
+    )
 
     args = parser.parse_args()
 
@@ -164,14 +229,21 @@ def main():
         # Only extract palettes and save
         logging.info("Extracting palettes only...")
         from palette_extraction import PaletteExtractor
+        from concurrent.futures import ThreadPoolExecutor
 
         extractor = PaletteExtractor(num_colors=args.num_colors)
 
-        logging.info("Extracting source palette...")
-        source_palette, source_weights = extractor.extract_palette(source_image)
+        # Extract both palettes in parallel
+        logging.info("Extracting source and target palettes in parallel...")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_source = executor.submit(extractor.extract_palette, source_image)
+            future_target = executor.submit(extractor.extract_palette, target_image)
 
-        logging.info("Extracting target palette...")
-        target_palette, target_weights = extractor.extract_palette(target_image)
+            source_palette, source_weights = future_source.result()
+            logging.info("Source palette extraction complete")
+
+            target_palette, target_weights = future_target.result()
+            logging.info("Target palette extraction complete")
 
         # Save palette information
         import pickle
@@ -202,11 +274,33 @@ def main():
                 save_path=palette_vis_path
             )
 
+            # Visualize k-means clustering results
+            kmeans_vis_path = args.output.replace('.png', '_kmeans_source.png')
+            extractor.visualize_kmeans_result(
+                source_image,
+                source_palette,
+                source_weights,
+                save_path=kmeans_vis_path
+            )
+
+            kmeans_vis_path_target = args.output.replace('.png', '_kmeans_target.png')
+            extractor.visualize_kmeans_result(
+                target_image,
+                target_palette,
+                target_weights,
+                save_path=kmeans_vis_path_target
+            )
+
         logging.info("Palette extraction complete!")
         return
 
     # Perform palette swap
     logging.info("Performing palette swap...")
+
+    # Enable return_all_results if we need to visualize all permutations
+    if args.show_all_permutations:
+        swapper._return_all_results = True
+
     result_image, info = swapper.swap_palette(
         source_image,
         target_image,
@@ -240,6 +334,17 @@ def main():
             source_image,
             result_image,
             save_path=result_vis_path
+        )
+
+    # Visualize all permutations if requested
+    if args.show_all_permutations and info.get('all_results'):
+        logging.info("Creating permutation comparison visualization...")
+        visualize_all_permutations(
+            source_image,
+            info['all_results'],
+            info['permutation'],
+            info['distance'],
+            save_path=args.output.replace('.png', '_all_permutations.png')
         )
 
     logging.info("Done!")

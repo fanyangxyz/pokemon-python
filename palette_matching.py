@@ -117,8 +117,9 @@ class PaletteMatcher:
         source_palette: np.ndarray,
         target_palette: np.ndarray,
         use_parallel: bool = True,
-        num_workers: int = 4
-    ) -> Tuple[np.ndarray, float, np.ndarray]:
+        num_workers: int = 4,
+        return_all_results: bool = False
+    ) -> Tuple[np.ndarray, float, np.ndarray, dict]:
         """
         Find optimal palette color matching.
 
@@ -129,11 +130,13 @@ class PaletteMatcher:
             target_palette: Target palette colors (K, 3)
             use_parallel: Use parallel processing for permutations
             num_workers: Number of parallel workers
+            return_all_results: Return all permutation results for visualization
 
         Returns:
             - best_permutation: Optimal permutation indices
             - best_distance: Minimum distance achieved
             - best_recolored_image: Best recolored image
+            - all_results: Dict with all permutation results (if return_all_results=True)
         """
         num_colors = len(source_palette)
 
@@ -151,6 +154,9 @@ class PaletteMatcher:
         best_distance = float('inf')
         best_permutation = None
         best_recolored_image = None
+
+        # Store all results if requested
+        all_results = {'permutations': [], 'distances': [], 'images': []} if return_all_results else None
 
         if use_parallel and len(all_perms) > 10:
             logging.info(f"Using optimized batch processing...")
@@ -223,6 +229,12 @@ class PaletteMatcher:
 
                 distance = self.hausdorff.compute_distance(source_features, all_perm_features[i])
 
+                # Store all results if requested
+                if return_all_results:
+                    all_results['permutations'].append(all_perms[i])
+                    all_results['distances'].append(distance)
+                    all_results['images'].append(recolored_images[i])
+
                 if distance < best_distance:
                     best_distance = distance
                     best_permutation = all_perms[i]
@@ -237,6 +249,12 @@ class PaletteMatcher:
                     perm, source_weights, target_palette, source_features
                 )
 
+                # Store all results if requested
+                if return_all_results:
+                    all_results['permutations'].append(perm)
+                    all_results['distances'].append(distance)
+                    all_results['images'].append(recolored_image)
+
                 if distance < best_distance:
                     best_distance = distance
                     best_permutation = perm
@@ -246,7 +264,10 @@ class PaletteMatcher:
         logging.info(f"Optimal permutation found: {best_permutation}")
         logging.info(f"Best distance: {best_distance:.6f}")
 
-        return np.array(best_permutation), best_distance, best_recolored_image
+        if return_all_results:
+            return np.array(best_permutation), best_distance, best_recolored_image, all_results
+        else:
+            return np.array(best_permutation), best_distance, best_recolored_image, None
 
     def quick_match(
         self,
@@ -375,13 +396,15 @@ class OptimalPaletteSwap:
 
         # Find optimal matching
         logging.info("Finding optimal palette matching...")
-        permutation, distance, result_image = self.palette_matcher.find_optimal_matching(
+        return_all = getattr(self, '_return_all_results', False)
+        permutation, distance, result_image, all_results = self.palette_matcher.find_optimal_matching(
             source_image,
             source_weights,
             source_palette,
             target_palette,
             use_parallel=use_parallel,
-            num_workers=num_workers
+            num_workers=num_workers,
+            return_all_results=return_all
         )
 
         info = {
@@ -389,7 +412,8 @@ class OptimalPaletteSwap:
             'target_palette': target_palette,
             'permutation': permutation,
             'distance': distance,
-            'source_weights': source_weights
+            'source_weights': source_weights,
+            'all_results': all_results
         }
 
         return result_image, info
