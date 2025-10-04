@@ -325,6 +325,24 @@ def main():
 
     # Visualizations
     if args.visualize:
+        # Visualize k-means clustering results
+        kmeans_vis_path = args.output.replace('.png', '_kmeans_source.png')
+        swapper.palette_extractor.visualize_kmeans_result(
+            source_image,
+            info['source_palette'],
+            info['source_weights'],
+            save_path=kmeans_vis_path
+        )
+
+        kmeans_vis_path_target = args.output.replace('.png', '_kmeans_target.png')
+        target_weights = swapper.palette_extractor.compute_weights(target_image, info['target_palette'])
+        swapper.palette_extractor.visualize_kmeans_result(
+            target_image,
+            info['target_palette'],
+            target_weights,
+            save_path=kmeans_vis_path_target
+        )
+
         palette_vis_path = args.output.replace('.png', '_palettes.png')
         visualize_palettes(
             info['source_palette'],

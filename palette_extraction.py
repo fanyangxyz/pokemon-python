@@ -148,6 +148,32 @@ class PaletteExtractor:
 
         plt.close()
 
+    def compute_weights(self, image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+        """
+        Compute hard assignment weights for an image given a palette.
+
+        Args:
+            image: Input image (H, W, 3)
+            palette: Palette colors (K, 3)
+
+        Returns:
+            weights: (H, W, K) hard assignment weights
+        """
+        H, W, C = image.shape
+        pixels = image.reshape(-1, 3)
+        n_pixels = len(pixels)
+        K = len(palette)
+
+        # Compute distances to palette colors
+        distances = np.sqrt(np.sum((pixels[:, np.newaxis, :] - palette[np.newaxis, :, :]) ** 2, axis=2))
+
+        # Hard assignment
+        nearest_cluster = np.argmin(distances, axis=1)
+        weights = np.zeros((n_pixels, K))
+        weights[np.arange(n_pixels), nearest_cluster] = 1.0
+
+        return weights.reshape(H, W, K)
+
     def apply_palette(self, weights: np.ndarray, new_palette: np.ndarray) -> np.ndarray:
         """
         Apply a new palette to existing weights.
