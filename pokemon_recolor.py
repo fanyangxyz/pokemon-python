@@ -46,17 +46,21 @@ def visualize_palettes(source_palette, target_palette, permutation, save_path=No
     plt.close()
 
 
-def visualize_results(source_image, result_image, save_path=None):
-    """Visualize source and result images side by side."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+def visualize_results(source_image, target_image, result_image, save_path=None):
+    """Visualize source, target, and result images side by side."""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
     axes[0].imshow(source_image)
-    axes[0].set_title('Original Image')
+    axes[0].set_title('Source Image\n(Original)', fontsize=12, fontweight='bold')
     axes[0].axis('off')
 
-    axes[1].imshow(result_image)
-    axes[1].set_title('Recolored Image')
+    axes[1].imshow(target_image)
+    axes[1].set_title('Target Image\n(Palette Source)', fontsize=12, fontweight='bold')
     axes[1].axis('off')
+
+    axes[2].imshow(result_image)
+    axes[2].set_title('Result\n(Source with Target Palette)', fontsize=12, fontweight='bold')
+    axes[2].axis('off')
 
     plt.tight_layout()
 
@@ -332,6 +336,7 @@ def main():
         result_vis_path = args.output.replace('.png', '_comparison.png')
         visualize_results(
             source_image,
+            target_image,
             result_image,
             save_path=result_vis_path
         )
