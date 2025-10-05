@@ -13,6 +13,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
 import torch
+import heapq
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
 
@@ -155,8 +156,11 @@ class PaletteMatcher:
         best_permutation = None
         best_recolored_image = None
 
-        # Store all results if requested
-        all_results = {'permutations': [], 'distances': [], 'images': []} if return_all_results else None
+        # Store top results if requested (using max heap to keep best 10)
+        if return_all_results:
+            max_results_to_store = 10
+            results_heap = []  # Max heap: stores (-distance, perm, image)
+        all_results = None
 
         if use_parallel and len(all_perms) > 10:
             logging.info(f"Using optimized batch processing...")
@@ -229,11 +233,14 @@ class PaletteMatcher:
 
                 distance = self.hausdorff.compute_distance(source_features, all_perm_features[i])
 
-                # Store all results if requested
+                # Store top results using heap
                 if return_all_results:
-                    all_results['permutations'].append(all_perms[i])
-                    all_results['distances'].append(distance)
-                    all_results['images'].append(recolored_images[i])
+                    if len(results_heap) < max_results_to_store:
+                        # Use negative distance for max heap (heapq is min heap)
+                        heapq.heappush(results_heap, (-distance, all_perms[i], recolored_images[i]))
+                    else:
+                        # Replace worst if this is better
+                        heapq.heappushpop(results_heap, (-distance, all_perms[i], recolored_images[i]))
 
                 if distance < best_distance:
                     best_distance = distance
@@ -249,11 +256,14 @@ class PaletteMatcher:
                     perm, source_weights, target_palette, source_features
                 )
 
-                # Store all results if requested
+                # Store top results using heap
                 if return_all_results:
-                    all_results['permutations'].append(perm)
-                    all_results['distances'].append(distance)
-                    all_results['images'].append(recolored_image)
+                    if len(results_heap) < max_results_to_store:
+                        # Use negative distance for max heap (heapq is min heap)
+                        heapq.heappush(results_heap, (-distance, perm, recolored_image))
+                    else:
+                        # Replace worst if this is better
+                        heapq.heappushpop(results_heap, (-distance, perm, recolored_image))
 
                 if distance < best_distance:
                     best_distance = distance
@@ -265,6 +275,20 @@ class PaletteMatcher:
         logging.info(f"Best distance: {best_distance:.6f}")
 
         if return_all_results:
+            # Convert heap to sorted results dict
+            all_results = {
+                'permutations': [],
+                'distances': [],
+                'images': []
+            }
+            # Sort by distance (ascending)
+            sorted_results = sorted(results_heap, key=lambda x: -x[0])
+            for neg_dist, perm, image in sorted_results:
+                all_results['distances'].append(-neg_dist)
+                all_results['permutations'].append(perm)
+                all_results['images'].append(image)
+
+            logging.info(f"Stored top {len(all_results['permutations'])} results for visualization")
             return np.array(best_permutation), best_distance, best_recolored_image, all_results
         else:
             return np.array(best_permutation), best_distance, best_recolored_image, None
