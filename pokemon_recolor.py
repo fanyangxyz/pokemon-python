@@ -209,6 +209,13 @@ def main():
         action='store_true',
         help='Visualize all permutation results with the optimal one highlighted'
     )
+    parser.add_argument(
+        '--extraction-method',
+        type=str,
+        default='kmeans',
+        choices=['kmeans', 'blind_separation'],
+        help='Palette extraction method: kmeans (fast, default) or blind_separation (gradient descent, slower)'
+    )
 
     args = parser.parse_args()
 
@@ -220,22 +227,23 @@ def main():
     target_image = load_image(args.target)
 
     # Initialize pipeline
-    logging.info(f"Initializing pipeline with {args.num_colors} colors...")
+    logging.info(f"Initializing pipeline with {args.num_colors} colors using {args.extraction_method} extraction...")
     swapper = OptimalPaletteSwap(
         num_colors=args.num_colors,
         hue_steps=args.hue_steps,
         sat_steps=args.sat_steps,
         val_steps=args.val_steps,
-        device=args.device
+        device=args.device,
+        extraction_method=args.extraction_method
     )
 
     if args.extract_only:
         # Only extract palettes and save
-        logging.info("Extracting palettes only...")
+        logging.info(f"Extracting palettes only using {args.extraction_method}...")
         from palette_extraction import PaletteExtractor
         from concurrent.futures import ThreadPoolExecutor
 
-        extractor = PaletteExtractor(num_colors=args.num_colors)
+        extractor = PaletteExtractor(num_colors=args.num_colors, method=args.extraction_method)
 
         # Extract both palettes in parallel
         logging.info("Extracting source and target palettes in parallel...")
@@ -278,21 +286,21 @@ def main():
                 save_path=palette_vis_path
             )
 
-            # Visualize k-means clustering results
-            kmeans_vis_path = args.output.replace('.png', '_kmeans_source.png')
+            # Visualize palette extraction results
+            extraction_vis_path = args.output.replace('.png', f'_{args.extraction_method}_source.png')
             extractor.visualize_kmeans_result(
                 source_image,
                 source_palette,
                 source_weights,
-                save_path=kmeans_vis_path
+                save_path=extraction_vis_path
             )
 
-            kmeans_vis_path_target = args.output.replace('.png', '_kmeans_target.png')
+            extraction_vis_path_target = args.output.replace('.png', f'_{args.extraction_method}_target.png')
             extractor.visualize_kmeans_result(
                 target_image,
                 target_palette,
                 target_weights,
-                save_path=kmeans_vis_path_target
+                save_path=extraction_vis_path_target
             )
 
         logging.info("Palette extraction complete!")
@@ -325,22 +333,22 @@ def main():
 
     # Visualizations
     if args.visualize:
-        # Visualize k-means clustering results
-        kmeans_vis_path = args.output.replace('.png', '_kmeans_source.png')
+        # Visualize palette extraction results
+        extraction_vis_path = args.output.replace('.png', f'_{args.extraction_method}_source.png')
         swapper.palette_extractor.visualize_kmeans_result(
             source_image,
             info['source_palette'],
             info['source_weights'],
-            save_path=kmeans_vis_path
+            save_path=extraction_vis_path
         )
 
-        kmeans_vis_path_target = args.output.replace('.png', '_kmeans_target.png')
+        extraction_vis_path_target = args.output.replace('.png', f'_{args.extraction_method}_target.png')
         target_weights = swapper.palette_extractor.compute_weights(target_image, info['target_palette'])
         swapper.palette_extractor.visualize_kmeans_result(
             target_image,
             info['target_palette'],
             target_weights,
-            save_path=kmeans_vis_path_target
+            save_path=extraction_vis_path_target
         )
 
         palette_vis_path = args.output.replace('.png', '_palettes.png')

@@ -137,12 +137,23 @@ class PaletteExtractor:
         image_tensor = torch.from_numpy(image).float().to(device)
         image_flat = image_tensor.reshape(-1, 3)  # (H*W, 3)
 
-        # Initialize palette with random colors from image
-        pixel_indices = np.random.choice(H * W, self.num_colors, replace=False)
-        palette = nn.Parameter(image_flat[pixel_indices].clone())
+        # Initialize palette and weights using k-means
+        from sklearn.cluster import KMeans
+        pixels_np = image_flat.cpu().numpy()
+        sample_size = min(10000, len(pixels_np))
+        sample_indices = np.random.choice(len(pixels_np), sample_size, replace=False)
+        kmeans = KMeans(n_clusters=self.num_colors, n_init=10, max_iter=100, random_state=42)
+        kmeans.fit(pixels_np[sample_indices])
 
-        # Initialize weights (H*W, K) with uniform distribution
-        weights = nn.Parameter(torch.ones(H * W, self.num_colors, device=device) / self.num_colors)
+        # Initialize palette from k-means centers
+        palette = nn.Parameter(torch.from_numpy(kmeans.cluster_centers_).float().to(device))
+
+        # Initialize weights based on k-means assignments
+        distances = torch.cdist(image_flat, palette)
+        nearest = torch.argmin(distances, dim=1)
+        weights_init = torch.zeros(H * W, self.num_colors, device=device)
+        weights_init[torch.arange(H * W, device=device), nearest] = 1.0
+        weights = nn.Parameter(weights_init)
 
         # Optimizer
         optimizer = optim.Adam([palette, weights], lr=0.01)
@@ -212,18 +223,30 @@ class PaletteExtractor:
             final_weights = torch.softmax(weights, dim=1).detach().cpu().numpy()
             final_weights = final_weights.reshape(H, W, self.num_colors)
 
-        # Log palette statistics
+        # Log palette statistics and weight distribution
         for i, color in enumerate(final_palette):
             color_rgb = (color * 255).astype(int)
             pixel_count = np.sum(np.argmax(final_weights, axis=2) == i)
             percentage = 100 * pixel_count / (H * W)
-            logging.info(f"  Color {i}: RGB{tuple(color_rgb)} - {percentage:.1f}% of pixels")
+
+            # Check weight statistics for this color
+            color_weights = final_weights[:, :, i]
+            avg_weight = np.mean(color_weights)
+            max_weight = np.max(color_weights)
+            num_high_weight = np.sum(color_weights > 0.9)
+
+            logging.info(
+                f"  Color {i}: RGB{tuple(color_rgb)} - {percentage:.1f}% dominant pixels, "
+                f"avg_weight={avg_weight:.3f}, max_weight={max_weight:.3f}, "
+                f"pixels_with_weight>0.9={num_high_weight}"
+            )
 
         return final_palette, final_weights
 
     def visualize_kmeans_result(self, image: np.ndarray, palette: np.ndarray, weights: np.ndarray, save_path: str = None):
         """
-        Visualize k-means clustering result showing original vs quantized image.
+        Visualize palette extraction result showing original vs reconstructed image.
+        For blind_separation, also shows weight layers.
 
         Args:
             image: Original image (H, W, 3)
@@ -235,43 +258,103 @@ class PaletteExtractor:
 
         H, W, K = weights.shape
 
-        # Reconstruct quantized image from palette
+        # Reconstruct image from palette
         weights_flat = weights.reshape(-1, K)
-        quantized = np.matmul(weights_flat, palette).reshape(H, W, 3)
-        quantized = np.clip(quantized, 0, 1)
+        reconstructed = np.matmul(weights_flat, palette).reshape(H, W, 3)
+        reconstructed = np.clip(reconstructed, 0, 1)
 
-        # Create visualization
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        # For blind_separation, create extended visualization with weight layers
+        if self.method == 'blind_separation':
+            # Create grid: top row = original, reconstructed, palette
+            # bottom rows = weight layers for each color
+            fig = plt.figure(figsize=(18, 8 + K * 2))
+            gs = fig.add_gridspec(2 + K, 3, height_ratios=[3, 3] + [2] * K)
 
-        # Original image
-        axes[0].imshow(image)
-        axes[0].set_title('Original Image', fontsize=14, fontweight='bold')
-        axes[0].axis('off')
+            # Original image
+            ax0 = fig.add_subplot(gs[0, 0])
+            ax0.imshow(image)
+            ax0.set_title('Original Image', fontsize=14, fontweight='bold')
+            ax0.axis('off')
 
-        # Reconstructed image
-        method_name = f'{self.method.replace("_", " ").title()}'
-        axes[1].imshow(quantized)
-        axes[1].set_title(f'{method_name} ({K} colors)', fontsize=14, fontweight='bold')
-        axes[1].axis('off')
+            # Reconstructed image
+            ax1 = fig.add_subplot(gs[0, 1])
+            ax1.imshow(reconstructed)
+            ax1.set_title(f'Blind Separation ({K} colors)', fontsize=14, fontweight='bold')
+            ax1.axis('off')
 
-        # Palette with statistics
-        palette_height = 100
-        palette_img = np.tile(palette[np.newaxis, :, :], (palette_height, 1, 1))
-        axes[2].imshow(palette_img, aspect='auto')
-        axes[2].set_title('Extracted Palette', fontsize=14, fontweight='bold')
-        axes[2].axis('off')
+            # Palette
+            ax2 = fig.add_subplot(gs[0, 2])
+            palette_height = 100
+            palette_img = np.tile(palette[np.newaxis, :, :], (palette_height, 1, 1))
+            ax2.imshow(palette_img, aspect='auto')
+            ax2.set_title('Extracted Palette', fontsize=14, fontweight='bold')
+            ax2.axis('off')
 
-        # Add color information below palette
-        info_text = ""
-        for i, color in enumerate(palette):
-            color_rgb = (color * 255).astype(int)
-            pixel_count = np.sum(np.argmax(weights, axis=2) == i)
-            percentage = 100 * pixel_count / (H * W)
-            info_text += f"Color {i}: RGB{tuple(color_rgb)} ({percentage:.1f}%)\n"
+            # Weight layers for each color
+            for i in range(K):
+                # Weight map
+                ax_weight = fig.add_subplot(gs[2 + i, 0])
+                weight_map = weights[:, :, i]
+                im = ax_weight.imshow(weight_map, cmap='viridis', vmin=0, vmax=1)
+                color_rgb = (palette[i] * 255).astype(int)
+                pixel_count = np.sum(np.argmax(weights, axis=2) == i)
+                percentage = 100 * pixel_count / (H * W)
+                avg_weight = np.mean(weight_map)
+                max_weight = np.max(weight_map)
+                ax_weight.set_title(f'Color {i} Weight Map\nRGB{tuple(color_rgb)} - {percentage:.1f}% dom\navg={avg_weight:.3f} max={max_weight:.3f}', fontsize=9)
+                ax_weight.axis('off')
+                plt.colorbar(im, ax=ax_weight, fraction=0.046)
 
-        fig.text(0.72, 0.15, info_text, fontsize=10, verticalalignment='top', family='monospace')
+                # Color layer (weight * color)
+                ax_layer = fig.add_subplot(gs[2 + i, 1])
+                color_layer = weight_map[:, :, np.newaxis] * palette[i][np.newaxis, np.newaxis, :]
+                ax_layer.imshow(color_layer)
+                ax_layer.set_title(f'Color {i} Layer', fontsize=9)
+                ax_layer.axis('off')
 
-        plt.tight_layout()
+                # Weight histogram
+                ax_hist = fig.add_subplot(gs[2 + i, 2])
+                ax_hist.hist(weight_map.flatten(), bins=50, range=(0, 1), color='blue', alpha=0.7)
+                ax_hist.set_xlim(0, 1)
+                ax_hist.set_title(f'Color {i} Weight Distribution', fontsize=9)
+                ax_hist.set_xlabel('Weight')
+                ax_hist.set_ylabel('Pixel Count')
+                ax_hist.grid(True, alpha=0.3)
+
+            plt.tight_layout()
+        else:
+            # Standard visualization for kmeans
+            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+            # Original image
+            axes[0].imshow(image)
+            axes[0].set_title('Original Image', fontsize=14, fontweight='bold')
+            axes[0].axis('off')
+
+            # Reconstructed image
+            method_name = f'{self.method.replace("_", " ").title()}'
+            axes[1].imshow(reconstructed)
+            axes[1].set_title(f'{method_name} ({K} colors)', fontsize=14, fontweight='bold')
+            axes[1].axis('off')
+
+            # Palette with statistics
+            palette_height = 100
+            palette_img = np.tile(palette[np.newaxis, :, :], (palette_height, 1, 1))
+            axes[2].imshow(palette_img, aspect='auto')
+            axes[2].set_title('Extracted Palette', fontsize=14, fontweight='bold')
+            axes[2].axis('off')
+
+            # Add color information below palette
+            info_text = ""
+            for i, color in enumerate(palette):
+                color_rgb = (color * 255).astype(int)
+                pixel_count = np.sum(np.argmax(weights, axis=2) == i)
+                percentage = 100 * pixel_count / (H * W)
+                info_text += f"Color {i}: RGB{tuple(color_rgb)} ({percentage:.1f}%)\n"
+
+            fig.text(0.72, 0.15, info_text, fontsize=10, verticalalignment='top', family='monospace')
+
+            plt.tight_layout()
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
