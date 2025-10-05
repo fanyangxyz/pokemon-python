@@ -1,7 +1,13 @@
 python pokemon_recolor.py \
     --visualize \
-    --extract-only \
-    --source eevee.png \
-    --target squirtle.jpg \
+    --show-all-permutations \
+    --num-colors 5 \
+    --hue-steps 5 \
+    --sat-steps 3 \
+    --val-steps 3 \
     --output output.png \
-    --workers 16
+    --workers 16 \
+    --extraction-method kmeans \
+    --device cpu \
+    --source images/pokemons/eevee.png \
+    --target images/pokemons/bulbasaur.png
