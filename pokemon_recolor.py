@@ -11,7 +11,7 @@ from palette_matching import OptimalPaletteSwap
 import matplotlib.pyplot as plt
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
 
 
 def visualize_palettes(source_palette, target_palette, permutation, save_path=None):

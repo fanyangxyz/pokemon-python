@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
 
 
 class PaletteExtractor:

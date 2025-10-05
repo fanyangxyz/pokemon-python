@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
 import torch
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
 
 
 class PaletteMatcher:
