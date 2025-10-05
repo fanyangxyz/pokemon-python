@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 class PaletteExtractor:
     """Extract color palette from an image using k-means clustering or Blind Color Separation."""
 
-    def __init__(self, num_colors: int = 5, max_iterations: int = 300, sample_fraction: float = 0.1, method: str = 'kmeans'):
+    def __init__(self, num_colors: int = 5, max_iterations: int = 3000, sample_fraction: float = 0.1, method: str = 'kmeans'):
         """
         Initialize palette extractor.
 
