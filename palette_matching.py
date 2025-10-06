@@ -6,7 +6,7 @@ Finds the best permutation of palette colors to minimize image space distance.
 import numpy as np
 from itertools import permutations
 from typing import Tuple, List
-from color_transforms import FastColorTransformSpace
+from color_transforms import FastColorTransformSpace, GPUColorTransformSpace
 from perceptual_loss import DeepImageDistance, LightweightImageFeatures
 from hausdorff_distance import ImageSpaceDistance, ApproximateHausdorff
 import logging
@@ -43,8 +43,6 @@ class PaletteMatcher:
             use_approximate: Use approximate Hausdorff for speed
             use_lightweight: Use lightweight CPU-friendly features instead of VGG (auto-detects if None)
         """
-        self.transform_space = FastColorTransformSpace(hue_steps, sat_steps, val_steps)
-
         # Auto-detect: use lightweight features on CPU, VGG on GPU
         if use_lightweight is None:
             if device is None:
@@ -53,6 +51,14 @@ class PaletteMatcher:
                 use_lightweight = (device == 'cpu')
 
         self.use_lightweight = use_lightweight
+        self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Use GPU transforms when using GPU for features
+        if self.device == 'cuda' and not self.use_lightweight:
+            logging.info("Using GPU-accelerated color transforms")
+            self.transform_space = GPUColorTransformSpace(hue_steps, sat_steps, val_steps, device=self.device)
+        else:
+            self.transform_space = FastColorTransformSpace(hue_steps, sat_steps, val_steps)
 
         if self.use_lightweight:
             logging.info("Using lightweight CPU-friendly features (color histograms + statistics)")
@@ -174,22 +180,33 @@ class PaletteMatcher:
             logging.info("Generating all recolored images...")
             recolored_images = self._generate_recolored_images(all_perms, source_weights, target_palette)
 
-            # Step 2: Generate all transformation spaces in parallel
-            logging.info(f"Generating transformation spaces with {num_workers} workers...")
+            # Step 2: Generate all transformation spaces
+            if self.device == 'cuda' and not self.use_lightweight:
+                # GPU: process sequentially but fast on GPU
+                logging.info(f"Generating transformation spaces on GPU...")
+                all_transforms = []
+                for i in range(len(all_perms)):
+                    transforms = self.transform_space.apply_all_transforms(recolored_images[i])
+                    all_transforms.append(transforms)
+                    if (i + 1) % 100 == 0:
+                        logging.info(f"Generated transforms for {i + 1}/{len(all_perms)} permutations")
+            else:
+                # CPU: use parallel processing
+                logging.info(f"Generating transformation spaces with {num_workers} workers...")
 
-            def process_transforms(idx):
-                return idx, self.transform_space.apply_all_transforms(recolored_images[idx])
+                def process_transforms(idx):
+                    return idx, self.transform_space.apply_all_transforms(recolored_images[idx])
 
-            all_transforms = [None] * len(all_perms)
+                all_transforms = [None] * len(all_perms)
 
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = [executor.submit(process_transforms, i) for i in range(len(all_perms))]
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    futures = [executor.submit(process_transforms, i) for i in range(len(all_perms))]
 
-                for future in futures:
-                    idx, transforms = future.result()
-                    all_transforms[idx] = transforms
-                    if (idx + 1) % 20 == 0:
-                        logging.info(f"Generated transforms for {idx + 1}/{len(all_perms)} permutations")
+                    for future in futures:
+                        idx, transforms = future.result()
+                        all_transforms[idx] = transforms
+                        if (idx + 1) % 20 == 0:
+                            logging.info(f"Generated transforms for {idx + 1}/{len(all_perms)} permutations")
 
             # Step 3: Batch extract features for all transforms
             logging.info("Extracting features for all permutations (batched)...")
