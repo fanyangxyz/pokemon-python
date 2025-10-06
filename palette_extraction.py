@@ -204,9 +204,26 @@ class PaletteExtractor:
             loss.backward()
             optimizer.step()
 
-            # Clamp palette to [0, 1]
+            # Clamp palette to [0, 1] and snap to nearest image colors
             with torch.no_grad():
                 palette.data.clamp_(0, 1)
+
+                # Every 10 iterations, snap palette colors to nearest image colors
+                # while ensuring diversity (no duplicates)
+                if (iteration + 1) % 10 == 0:
+                    distances_to_img = torch.cdist(palette, image_flat, p=2)
+
+                    # Greedy assignment to avoid duplicates
+                    used_indices = set()
+                    for k in range(self.num_colors):
+                        # Find nearest unused image pixel
+                        sorted_distances, sorted_indices = torch.sort(distances_to_img[k])
+                        for idx in sorted_indices:
+                            idx_val = idx.item()
+                            if idx_val not in used_indices:
+                                palette.data[k] = image_flat[idx_val]
+                                used_indices.add(idx_val)
+                                break
 
             if (iteration + 1) % 50 == 0:
                 logging.info(
