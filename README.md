@@ -140,6 +140,10 @@ For K colors:
 - Transform generation: Configurable via `--workers` (default: 4)
 - Chunked permutation processing for memory efficiency
 
+## References
+
+- [【毕业论文】求解最优的任意宝可梦颜色交换算法](https://zhuanlan.zhihu.com/p/695729586)
+
 ## License
 
 MIT License
