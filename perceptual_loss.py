@@ -220,21 +220,18 @@ class DeepImageDistance:
             # Single batched VGG forward pass
             batch_features = self.vgg_loss.extract_features(batch_tensor)
 
-        # Extract feature vectors for each image
-        all_features = []
-        for i in range(len(images)):
-            feature_vectors = []
+            # Process features on GPU before moving to CPU
+            all_features = []
             for layer_feat in batch_features:
-                # Get features for image i
-                feat = layer_feat[i]  # (C, H, W)
-                feat_np = feat.cpu().numpy().reshape(feat.shape[0], -1).T  # (H*W, C)
-                # Average over spatial dimension
-                feat_avg = np.mean(feat_np, axis=0)  # (C,)
-                feature_vectors.append(feat_avg)
+                # Global average pool on GPU: (N, C, H, W) -> (N, C)
+                feat_pooled = torch.mean(layer_feat.view(layer_feat.size(0), layer_feat.size(1), -1), dim=2)
+                all_features.append(feat_pooled)
 
-            all_features.append(np.concatenate(feature_vectors))
+            # Concatenate on GPU then move to CPU once
+            concatenated = torch.cat(all_features, dim=1)  # (N, total_C)
+            result = concatenated.cpu().numpy()
 
-        return np.stack(all_features)
+        return result
 
 
 class LightweightImageFeatures:
