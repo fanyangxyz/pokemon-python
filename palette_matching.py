@@ -150,6 +150,11 @@ class PaletteMatcher:
         logging.info("Computing source image transformation space...")
         source_transforms = self.transform_space.apply_all_transforms(source_image)
         logging.info(f"Extracting features from source transforms ({len(source_transforms)} transforms)...")
+
+        # Free GPU memory before VGG processing if using GPU
+        if not self.use_lightweight and hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+
         source_features = self.feature_extractor.batch_get_features(source_transforms)
 
         best_distance = float('inf')
@@ -200,8 +205,9 @@ class PaletteMatcher:
                 logging.info(f"Processing {len(all_images_flat)} images with lightweight features...")
                 all_features_flat = self.feature_extractor.batch_get_features(all_images_flat)
             else:
-                # VGG needs batching
-                vgg_batch_size = 128  # Process 128 images at a time through VGG
+                # VGG needs batching - use smaller batch size for large images to avoid OOM
+                # Memory usage scales with batch_size * H * W * channels_per_layer
+                vgg_batch_size = 64  # Conservative for 475x475 images on 22GB GPU
                 all_features_flat = []
 
                 for batch_start in range(0, len(all_images_flat), vgg_batch_size):
@@ -212,6 +218,10 @@ class PaletteMatcher:
                     batch_images = all_images_flat[batch_start:batch_end]
                     batch_features = self.feature_extractor.batch_get_features(batch_images)
                     all_features_flat.append(batch_features)
+
+                    # Clear GPU cache periodically to avoid fragmentation
+                    if (batch_start // vgg_batch_size) % 10 == 0:
+                        torch.cuda.empty_cache()
 
                 all_features_flat = np.concatenate(all_features_flat, axis=0)
 
