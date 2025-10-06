@@ -406,8 +406,24 @@ class PaletteExtractor:
 
 
 def load_image(path: str) -> np.ndarray:
-    """Load image and convert to numpy array in [0, 1] range."""
-    img = Image.open(path).convert('RGB')
+    """Load image and convert to numpy array in [0, 1] range. Fills transparent background with white."""
+    img = Image.open(path)
+
+    # If image has alpha channel, composite onto white background
+    if img.mode in ('RGBA', 'LA', 'P'):
+        # Create white background
+        background = Image.new('RGB', img.size, (255, 255, 255))
+
+        # Convert image to RGBA if it isn't already
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+
+        # Composite image onto white background
+        background.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+        img = background
+    else:
+        img = img.convert('RGB')
+
     return np.array(img, dtype=np.float32) / 255.0
 
 
