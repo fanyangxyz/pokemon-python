@@ -225,7 +225,7 @@ class PaletteExtractor:
                                 used_indices.add(idx_val)
                                 break
 
-            if (iteration + 1) % 50 == 0:
+            if (iteration + 1) % 500 == 0:
                 logging.info(
                     f"Iteration {iteration + 1}/{self.max_iterations}: "
                     f"Loss={loss.item():.6f}, "
