@@ -9,5 +9,5 @@ python pokemon_recolor.py \
     --workers 16 \
     --extraction-method kmeans \
     --device cpu \
-    --source images/pokemons/eevee.png \
-    --target images/pokemons/bulbasaur.png
+    --source images/pokemons/jigglypuff.png \
+    --target images/pokemons/eevee.png
