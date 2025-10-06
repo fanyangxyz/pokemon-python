@@ -201,7 +201,7 @@ class PaletteMatcher:
                 all_features_flat = self.feature_extractor.batch_get_features(all_images_flat)
             else:
                 # VGG needs batching
-                vgg_batch_size = 32  # Process 32 images at a time through VGG
+                vgg_batch_size = 128  # Process 128 images at a time through VGG
                 all_features_flat = []
 
                 for batch_start in range(0, len(all_images_flat), vgg_batch_size):
