@@ -37,7 +37,7 @@ for source in "${IMAGES[@]}"; do
         OUTPUT_PREFIX="batch-results/${source_name}_to_${target_name}"
 
         # Run recoloring with GPU, VGG features, blind separation, and visualization
-        python pokemon_recolor.py \
+        python3 pokemon_recolor.py \
             --source "$source" \
             --target "$target" \
             --output "${OUTPUT_PREFIX}.png" \
@@ -45,8 +45,11 @@ for source in "${IMAGES[@]}"; do
             --device cuda \
             --visualize \
             --show-all-permutations \
-            --num-colors 6 \
-            --workers 32
+            --num-colors 5 \
+            --workers 32 \
+	    --hue-steps 4 \
+	    --sat-steps 2 \
+	    --val-steps 2
 
         echo "Completed: $source_name -> $target_name"
         echo "Saved to: ${OUTPUT_PREFIX}.png"
