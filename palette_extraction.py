@@ -210,7 +210,7 @@ class PaletteExtractor:
 
                 # Every 10 iterations, snap palette colors to nearest image colors
                 # while ensuring diversity (no duplicates)
-                if (iteration + 1) % 10 == 0:
+                if (iteration + 1) % 500 == 0:
                     distances_to_img = torch.cdist(palette, image_flat, p=2)
 
                     # Greedy assignment to avoid duplicates
