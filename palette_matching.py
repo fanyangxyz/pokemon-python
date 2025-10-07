@@ -117,6 +117,57 @@ class PaletteMatcher:
 
         return distance, recolored_image
 
+    def _is_black(self, color: np.ndarray, threshold: float = 0.15) -> bool:
+        """Check if a color is black (all channels < threshold)."""
+        return np.all(color < threshold)
+
+    def _is_white(self, color: np.ndarray, threshold: float = 0.85) -> bool:
+        """Check if a color is white (all channels > threshold)."""
+        return np.all(color > threshold)
+
+    def _find_fixed_mappings(self, source_palette: np.ndarray, target_palette: np.ndarray) -> Tuple[dict, list, list]:
+        """
+        Find fixed mappings for black->black and white->white.
+
+        Returns:
+            - fixed_mappings: Dict mapping source index to target index
+            - free_source_indices: List of source indices that are not fixed
+            - free_target_indices: List of target indices that are not fixed
+        """
+        num_colors = len(source_palette)
+        fixed_mappings = {}
+        used_targets = set()
+
+        # Find blacks
+        source_blacks = [i for i in range(num_colors) if self._is_black(source_palette[i])]
+        target_blacks = [i for i in range(num_colors) if self._is_black(target_palette[i])]
+
+        # Find whites
+        source_whites = [i for i in range(num_colors) if self._is_white(source_palette[i])]
+        target_whites = [i for i in range(num_colors) if self._is_white(target_palette[i])]
+
+        # Map source blacks to target blacks
+        for src_idx in source_blacks:
+            if target_blacks:
+                tgt_idx = target_blacks[0]
+                fixed_mappings[src_idx] = tgt_idx
+                used_targets.add(tgt_idx)
+                logging.info(f"Fixed mapping: source black (idx {src_idx}) -> target black (idx {tgt_idx})")
+
+        # Map source whites to target whites
+        for src_idx in source_whites:
+            if target_whites:
+                tgt_idx = target_whites[0]
+                fixed_mappings[src_idx] = tgt_idx
+                used_targets.add(tgt_idx)
+                logging.info(f"Fixed mapping: source white (idx {src_idx}) -> target white (idx {tgt_idx})")
+
+        # Find free indices
+        free_source_indices = [i for i in range(num_colors) if i not in fixed_mappings]
+        free_target_indices = [i for i in range(num_colors) if i not in used_targets]
+
+        return fixed_mappings, free_source_indices, free_target_indices
+
     def find_optimal_matching(
         self,
         source_image: np.ndarray,
@@ -147,10 +198,41 @@ class PaletteMatcher:
         """
         num_colors = len(source_palette)
 
-        # Generate all possible permutations
-        all_perms = list(permutations(range(num_colors)))
+        # Find fixed mappings (black->black, white->white)
+        fixed_mappings, free_source_indices, free_target_indices = self._find_fixed_mappings(
+            source_palette, target_palette
+        )
 
-        logging.info(f"Testing {len(all_perms)} permutations...")
+        if fixed_mappings:
+            logging.info(f"Found {len(fixed_mappings)} fixed mappings (black/white constraints)")
+            logging.info(f"Will search over {len(free_source_indices)}! = {np.math.factorial(len(free_source_indices))} permutations instead of {np.math.factorial(num_colors)}")
+
+        # Generate permutations only for free indices
+        if free_source_indices:
+            free_perms = list(permutations(free_target_indices))
+
+            # Reconstruct full permutations by combining fixed and free mappings
+            all_perms = []
+            for free_perm in free_perms:
+                full_perm = [None] * num_colors
+
+                # Apply fixed mappings
+                for src_idx, tgt_idx in fixed_mappings.items():
+                    full_perm[src_idx] = tgt_idx
+
+                # Apply free permutation
+                for i, src_idx in enumerate(free_source_indices):
+                    full_perm[src_idx] = free_perm[i]
+
+                all_perms.append(tuple(full_perm))
+        else:
+            # All indices are fixed
+            full_perm = [None] * num_colors
+            for src_idx, tgt_idx in fixed_mappings.items():
+                full_perm[src_idx] = tgt_idx
+            all_perms = [tuple(full_perm)]
+
+        logging.info(f"Testing {len(all_perms)} permutations (with black/white constraints)...")
 
         # Precompute source image transformation space features
         logging.info("Computing source image transformation space...")
