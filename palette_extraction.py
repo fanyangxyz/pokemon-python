@@ -3,6 +3,7 @@ Palette extraction module with multiple methods:
 1. K-means clustering - Simple and robust
 2. Blind Color Separation - Gradient descent optimization with sparsity constraints
 """
+import os
 
 import numpy as np
 from PIL import Image
@@ -521,5 +522,5 @@ def load_palette(input_path: str) -> Tuple[np.ndarray, np.ndarray]:
     data = np.load(input_path)
     palette = data['palette']
     weights = data['weights']
-    logging.info(f"palette_extraction.py:504 - Loaded palette from {input_path}")
+    logging.info(f"Loaded palette from {input_path}")
     return palette, weights
