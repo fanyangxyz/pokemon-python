@@ -51,7 +51,7 @@ for source in "${IMAGES[@]}"; do
             --device cuda \
             --visualize \
             --show-all-permutations \
-            --num-colors 5 \
+            --num-colors 6 \
             --workers 32 \
 	    --hue-steps 4 \
 	    --sat-steps 2 \
