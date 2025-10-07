@@ -36,6 +36,12 @@ for source in "${IMAGES[@]}"; do
         # Output filename
         OUTPUT_PREFIX="batch-results/${source_name}_to_${target_name}"
 
+        # Skip if output already exists
+        if [ -f "${OUTPUT_PREFIX}.png" ]; then
+            echo "Skipping (already exists)"
+            continue
+        fi
+
         # Run recoloring with GPU, VGG features, blind separation, and visualization
         python3 pokemon_recolor.py \
             --source "$source" \
