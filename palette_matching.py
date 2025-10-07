@@ -489,7 +489,9 @@ class OptimalPaletteSwap:
         source_weights: np.ndarray = None,
         target_palette: np.ndarray = None,
         use_parallel: bool = True,
-        num_workers: int = 4
+        num_workers: int = 4,
+        source_image_path: str = None,
+        target_image_path: str = None
     ) -> Tuple[np.ndarray, dict]:
         """
         Swap palette from target to source image.
@@ -502,6 +504,8 @@ class OptimalPaletteSwap:
             source_palette: Pre-extracted source palette (optional)
             source_weights: Pre-extracted source weights (optional)
             target_palette: Pre-extracted target palette (optional)
+            source_image_path: Path to source image (for caching)
+            target_image_path: Path to target image (for caching)
 
         Returns:
             - result_image: Recolored image
@@ -513,8 +517,8 @@ class OptimalPaletteSwap:
             logging.info("Extracting source and target palettes in parallel...")
 
             with ThreadPoolExecutor(max_workers=2) as executor:
-                future_source = executor.submit(self.palette_extractor.extract_palette, source_image)
-                future_target = executor.submit(self.palette_extractor.extract_palette, target_image)
+                future_source = executor.submit(self.palette_extractor.extract_palette, source_image, source_image_path)
+                future_target = executor.submit(self.palette_extractor.extract_palette, target_image, target_image_path)
 
                 source_palette, source_weights = future_source.result()
                 target_palette, _ = future_target.result()
@@ -522,12 +526,12 @@ class OptimalPaletteSwap:
             # Extract source palette if needed
             if extract_source or source_palette is None or source_weights is None:
                 logging.info("Extracting source palette...")
-                source_palette, source_weights = self.palette_extractor.extract_palette(source_image)
+                source_palette, source_weights = self.palette_extractor.extract_palette(source_image, source_image_path)
 
             # Extract target palette if needed
             if extract_target or target_palette is None:
                 logging.info("Extracting target palette...")
-                target_palette, _ = self.palette_extractor.extract_palette(target_image)
+                target_palette, _ = self.palette_extractor.extract_palette(target_image, target_image_path)
 
         # Find optimal matching
         logging.info("Finding optimal palette matching...")

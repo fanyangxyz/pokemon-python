@@ -37,21 +37,37 @@ class PaletteExtractor:
         if method not in ['kmeans', 'blind_separation']:
             raise ValueError(f"Unknown method: {method}. Use 'kmeans' or 'blind_separation'")
 
-    def extract_palette(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_palette(self, image: np.ndarray, image_path: str = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract palette and weights from an image.
 
         Args:
             image: Input image as numpy array (H, W, 3) with values in [0, 1]
+            image_path: Optional path to image file (for caching)
 
         Returns:
             palette: (num_colors, 3) array of RGB colors
             weights: (H, W, num_colors) array of weights for each pixel
         """
+        # Check cache if image_path is provided
+        if image_path:
+            cache_path = get_palette_cache_path(image_path, self.num_colors, self.method)
+            if os.path.exists(cache_path):
+                logging.info(f"palette_extraction.py:56 - Loading cached palette from {cache_path}")
+                return load_palette(cache_path)
+
+        # Extract palette
         if self.method == 'kmeans':
-            return self._extract_palette_kmeans(image)
+            palette, weights = self._extract_palette_kmeans(image)
         elif self.method == 'blind_separation':
-            return self._extract_palette_blind_separation(image)
+            palette, weights = self._extract_palette_blind_separation(image)
+
+        # Save to cache if image_path is provided
+        if image_path:
+            cache_path = get_palette_cache_path(image_path, self.num_colors, self.method)
+            save_palette(palette, weights, cache_path)
+
+        return palette, weights
 
     def _extract_palette_kmeans(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -448,3 +464,62 @@ def save_image(image: np.ndarray, path: str):
     """Save image from numpy array."""
     img = (np.clip(image, 0, 1) * 255).astype(np.uint8)
     Image.fromarray(img).save(path)
+
+
+def get_palette_cache_path(image_path: str, num_colors: int, method: str) -> str:
+    """
+    Get cache path for a palette based on image path and extraction parameters.
+
+    Args:
+        image_path: Path to the image
+        num_colors: Number of colors in palette
+        method: Extraction method ('kmeans' or 'blind_separation')
+
+    Returns:
+        Path to cache file
+    """
+    # Create cache directory next to the image
+    cache_dir = os.path.join(os.path.dirname(image_path) or '.', '.palette_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Use image basename and parameters to create cache filename
+    image_basename = os.path.splitext(os.path.basename(image_path))[0]
+    cache_filename = f"{image_basename}_{num_colors}_{method}.npz"
+
+    return os.path.join(cache_dir, cache_filename)
+
+
+def save_palette(palette: np.ndarray, weights: np.ndarray, output_path: str):
+    """
+    Save palette and weights to disk.
+
+    Args:
+        palette: (K, 3) palette colors
+        weights: (H, W, K) weight array
+        output_path: Path to save (will create .npz file)
+    """
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    np.savez_compressed(
+        output_path,
+        palette=palette,
+        weights=weights
+    )
+    logging.info(f"palette_extraction.py:487 - Saved palette to {output_path}")
+
+
+def load_palette(input_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load palette and weights from disk.
+
+    Args:
+        input_path: Path to .npz file
+
+    Returns:
+        palette: (K, 3) palette colors
+        weights: (H, W, K) weight array
+    """
+    data = np.load(input_path)
+    palette = data['palette']
+    weights = data['weights']
+    logging.info(f"palette_extraction.py:504 - Loaded palette from {input_path}")
+    return palette, weights

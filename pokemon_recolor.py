@@ -245,11 +245,11 @@ def main():
 
         extractor = PaletteExtractor(num_colors=args.num_colors, method=args.extraction_method)
 
-        # Extract both palettes in parallel
+        # Extract both palettes in parallel (with caching)
         logging.info("Extracting source and target palettes in parallel...")
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_source = executor.submit(extractor.extract_palette, source_image)
-            future_target = executor.submit(extractor.extract_palette, target_image)
+            future_source = executor.submit(extractor.extract_palette, source_image, args.source)
+            future_target = executor.submit(extractor.extract_palette, target_image, args.target)
 
             source_palette, source_weights = future_source.result()
             logging.info("Source palette extraction complete")
@@ -317,7 +317,9 @@ def main():
         source_image,
         target_image,
         use_parallel=not args.no_parallel,
-        num_workers=args.workers
+        num_workers=args.workers,
+        source_image_path=args.source,
+        target_image_path=args.target
     )
 
     # Save result
