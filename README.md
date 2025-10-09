@@ -2,6 +2,8 @@
 
 An implementation of optimal color palette swapping for images, designed for transferring color schemes between Pokémon or any other images.
 
+![Example: Charizard recolored using different other Pokemons](batch-results-five-colors/charizard_all_transformations.png)
+
 ## Overview
 
 This project implements an automatic color palette extraction and swapping system that can:
