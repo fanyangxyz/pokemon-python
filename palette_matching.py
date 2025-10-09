@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
 import torch
 import heapq
+import math
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
 
@@ -205,7 +206,7 @@ class PaletteMatcher:
 
         if fixed_mappings:
             logging.info(f"Found {len(fixed_mappings)} fixed mappings (black/white constraints)")
-            logging.info(f"Will search over {len(free_source_indices)}! = {np.math.factorial(len(free_source_indices))} permutations instead of {np.math.factorial(num_colors)}")
+            logging.info(f"Will search over {len(free_source_indices)}! = {math.factorial(len(free_source_indices))} permutations instead of {math.factorial(num_colors)}")
 
         # Generate permutations only for free indices
         if free_source_indices:
