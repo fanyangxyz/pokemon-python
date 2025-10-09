@@ -1,4 +1,4 @@
-batch-results-five-colors/*
-.DS_Store
-*/.DS_Store
+batch-results*/*
+*.DS_Store
 __pycache__/
+*.png
