@@ -118,28 +118,6 @@ Find the palette permutation π that minimizes:
 
 **Memory optimization**: Uses a max heap to store only the top 10 best permutations during search, preventing memory issues with large K.
 
-## More Details
-
-### Complexity
-
-For K colors:
-- **Permutations to test**: K! (e.g., 5 colors = 120, 8 colors = 40,320!)
-- **Transforms per image**: hue_steps × sat_steps × val_steps (default: 72)
-- **Total feature extractions**: K! × transforms
-
-### Memory Optimization
-
-- **Heap-based storage**: Only keeps top 10 best permutation results in memory
-- **Chunked processing**: Processes permutations in batches of 100 to avoid memory spikes
-- **Batched features**: Feature extraction is batched to reduce peak memory usage
-
-### Parallelization
-
-- Palette extraction: 2 workers (source + target in parallel)
-- Feature extraction: CPU count workers
-- Transform generation: Configurable via `--workers` (default: 4)
-- Chunked permutation processing for memory efficiency
-
 ## References
 
 - [【毕业论文】求解最优的任意宝可梦颜色交换算法](https://zhuanlan.zhihu.com/p/695729586)
