@@ -2,3 +2,8 @@ batch-results*/*
 *.DS_Store
 __pycache__/
 *.png
+*.pkl
+
+# Palette cache directories
+.palette_cache/
+**/.palette_cache/
