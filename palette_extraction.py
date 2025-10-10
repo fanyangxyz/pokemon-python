@@ -175,12 +175,10 @@ class PaletteExtractor:
         # Optimizer
         optimizer = optim.Adam([palette, weights], lr=0.01)
 
-        # Progressive L0 approximation parameter (gradually increase)
-        beta_start = 0.1
-        beta_end = 10.0
-        beta_schedule = np.logspace(np.log10(beta_start), np.log10(beta_end), self.max_iterations)
+        # Fixed L0 approximation parameter
+        beta = 1.0
 
-        logging.info(f"Starting optimization for {self.max_iterations} iterations...")
+        logging.info(f"Starting optimization for {self.max_iterations} iterations with fixed beta={beta}...")
 
         for iteration in range(self.max_iterations):
             optimizer.zero_grad()
@@ -196,7 +194,6 @@ class PaletteExtractor:
 
             # Sparsity loss (L0 approximation using smooth approximation)
             # Using sigmoid-based smooth L0: 1 / (1 + exp(-beta * (w - threshold)))
-            beta = beta_schedule[iteration]
             threshold = 0.1
             sparsity_loss = torch.mean(
                 torch.sigmoid(beta * (weights_normalized - threshold))
