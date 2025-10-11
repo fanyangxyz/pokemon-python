@@ -51,7 +51,7 @@ for source in "${IMAGES[@]}"; do
             --device cpu \
             --visualize \
             --show-all-permutations \
-            --num-colors 6 \
+            --num-colors 5 \
             --workers 16 \
 	    --hue-steps 4 \
 	    --sat-steps 2 \
