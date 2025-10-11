@@ -1,9 +1,9 @@
 # Pokémon Color Palette Swapping
 
 An implementation of optimal color palette swapping for images, designed for transferring color schemes between Pokémon or any other images.
+Blog post with more details can be found [here](https://fanyangxyz.github.io/2025/10/04/recoloring/).
 
 ![Example: Charizard recolored using different other Pokemons](batch-results-five-colors/charizard_all_transformations.png)
-[Blog post](https://fanyangxyz.github.io/2025/10/04/recoloring/).
 
 
 ## Overview
