@@ -3,6 +3,8 @@
 An implementation of optimal color palette swapping for images, designed for transferring color schemes between Pokémon or any other images.
 
 ![Example: Charizard recolored using different other Pokemons](batch-results-five-colors/charizard_all_transformations.png)
+[Blog post](https://fanyangxyz.github.io/2025/10/04/recoloring/).
+
 
 ## Overview
 
@@ -117,8 +119,6 @@ Find the palette permutation π that minimizes:
 ```
 π* = argmin_π D(I_source, apply_palette(I_source, palette_target[π]))
 ```
-
-**Memory optimization**: Uses a max heap to store only the top 10 best permutations during search, preventing memory issues with large K.
 
 ## References
 
